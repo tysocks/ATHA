@@ -49,6 +49,10 @@ class Port:
             raise PortConnectionError(
                 f"Port {self.name} is already connected to {self._connected_to.name}."
             )
+        if other._connected_to is not None:
+            raise PortConnectionError(
+                f"Port {other.name} is already connected to {other._connected_to.name}."
+            )
         self._connected_to = other
         other._connected_to = self
 
