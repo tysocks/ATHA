@@ -30,6 +30,13 @@ class IdealGasBackend(ThermoBackend):
 
     def state_from_Ph(self, P: float, h: float) -> FluidState:
         T = h / self.cp
+        if T <= 0:
+            raise ValueError(
+                f"IdealGasBackend uses h=Cp*T (zero reference at 0K), "
+                f"so h must be positive. Got h={h:.3g} J/kg → T={T:.3g} K. "
+                f"If your enthalpy uses a non-zero reference datum (e.g., from CoolProp), "
+                f"do not mix IdealGasBackend with CoolProp states."
+            )
         return self.state_from_PT(P, T)
 
     def state_from_Ps(self, P: float, s: float) -> FluidState:

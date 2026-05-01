@@ -4,6 +4,15 @@ import pytest
 from atha.thermo.interface import FluidState, ThermoBackend
 from atha.thermo.ideal_gas import IdealGasBackend
 
+coolprop_available = pytest.mark.skipif(
+    not __import__('importlib').util.find_spec('CoolProp'),
+    reason="CoolProp not installed"
+)
+cantera_available = pytest.mark.skipif(
+    not __import__('importlib').util.find_spec('cantera'),
+    reason="Cantera not installed"
+)
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -69,17 +78,25 @@ def test_ideal_gas_state_from_Ps_roundtrip(air):
     recovered = air.state_from_Ps(P=original.P, s=original.s)
     assert abs(recovered.T - original.T) < 0.01
 
+def test_ideal_gas_state_from_Ph_negative_enthalpy_raises(air):
+    with pytest.raises(ValueError, match="h must be positive"):
+        air.state_from_Ph(P=1e5, h=-100.0)
+
+def test_ideal_gas_state_from_Ph_zero_enthalpy_raises(air):
+    with pytest.raises(ValueError, match="h must be positive"):
+        air.state_from_Ph(P=1e5, h=0.0)
+
 
 # ── CoolProp (conditional — skip if not installed) ───────────────────────────
 
-pytest.importorskip("CoolProp", reason="CoolProp not installed")
-
+@coolprop_available
 def test_coolprop_lox_liquid_phase():
     from atha.thermo.coolprop_backend import CoolPropBackend
     lox = CoolPropBackend("Oxygen")
     state = lox.state_from_PT(P=1e5, T=90.0)
     assert state.phase == 'liquid'
 
+@coolprop_available
 def test_coolprop_lox_density_at_nbp():
     from atha.thermo.coolprop_backend import CoolPropBackend
     lox = CoolPropBackend("Oxygen")
@@ -88,6 +105,7 @@ def test_coolprop_lox_density_at_nbp():
     state = lox.state_from_PT(P=101325.0, T=90.18)
     assert 1100.0 < state.rho < 1180.0, f"LOX density {state.rho:.1f} out of expected range"
 
+@coolprop_available
 def test_coolprop_ph_roundtrip():
     from atha.thermo.coolprop_backend import CoolPropBackend
     lox = CoolPropBackend("Oxygen")
@@ -95,6 +113,7 @@ def test_coolprop_ph_roundtrip():
     recovered = lox.state_from_Ph(P=original.P, h=original.h)
     assert abs(recovered.T - original.T) < 0.1
 
+@coolprop_available
 def test_coolprop_isentropic_entropy_conserved():
     from atha.thermo.coolprop_backend import CoolPropBackend
     # Use gaseous oxygen for a clean isentropic test
@@ -106,8 +125,7 @@ def test_coolprop_isentropic_entropy_conserved():
 
 # ── Cantera (conditional — skip if not installed) ─────────────────────────────
 
-pytest.importorskip("cantera", reason="Cantera not installed")
-
+@cantera_available
 def test_cantera_lox_lh2_adiabatic_temperature():
     from atha.thermo.cantera_backend import CanteraBackend
     cb = CanteraBackend("h2o2.yaml")
@@ -117,6 +135,7 @@ def test_cantera_lox_lh2_adiabatic_temperature():
     # LOX/LH2 at MR=6, 20MPa: T_ad should be in 3400–3800 K range
     assert 3400 < result.T_ad < 3800, f"T_ad={result.T_ad:.0f}K out of range"
 
+@cantera_available
 def test_cantera_c_star_reasonable():
     from atha.thermo.cantera_backend import CanteraBackend
     cb = CanteraBackend("h2o2.yaml")

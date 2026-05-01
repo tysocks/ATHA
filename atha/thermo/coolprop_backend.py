@@ -1,4 +1,5 @@
 from __future__ import annotations
+import warnings
 import CoolProp.CoolProp as CP
 from atha.thermo.interface import FluidState, ThermoBackend
 
@@ -31,7 +32,14 @@ class CoolPropBackend(ThermoBackend):
     def _read(self) -> FluidState:
         AS = self._AS
         phase_key = AS.phase()
-        phase = _PHASE_MAP.get(phase_key, 'gas')
+        phase = _PHASE_MAP.get(phase_key)
+        if phase is None:
+            warnings.warn(
+                f"CoolProp returned unknown phase key {phase_key} for fluid '{self._fluid}'. "
+                f"Defaulting to 'gas'. Check operating conditions near the critical point.",
+                RuntimeWarning, stacklevel=3,
+            )
+            phase = 'gas'
         quality = float(AS.Q()) if phase == 'two-phase' else None
         return FluidState(
             P=float(AS.p()),
