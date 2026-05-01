@@ -293,3 +293,263 @@ def test_orifice_choked_exceeds_subsonic():
     out_lo = orifice.compute_outputs(0.0, {}, inputs_lo)
     # High PR should give more flow than low PR
     assert out_hi["mdot"] > out_lo["mdot"]
+
+
+# ── Valve tests ───────────────────────────────────────────────────────────────
+
+from atha.components.valve import Valve
+
+
+def test_valve_no_states():
+    v = Valve("v1", max_area=1e-3)
+    assert v.n_states == 0
+
+
+def test_valve_fully_open():
+    v = Valve("v1", max_area=1e-3, discharge_coeff=1.0)
+    rho = 1000.0
+    dP = 1e4
+    expected = 1e-3 * math.sqrt(2 * rho * dP)
+    inputs = {"inlet.P": 1e5 + dP, "outlet.P": 1e5, "inlet.rho": rho, "valve.A_frac": 1.0}
+    out = v.compute_outputs(0.0, {}, inputs)
+    assert abs(out["mdot"] - expected) / expected < 1e-6
+
+
+def test_valve_half_open_halves_flow():
+    v = Valve("v1", max_area=1e-3, discharge_coeff=1.0)
+    rho, dP = 1000.0, 1e4
+    inputs_full = {"inlet.P": 1e5+dP, "outlet.P": 1e5, "inlet.rho": rho, "valve.A_frac": 1.0}
+    inputs_half = {"inlet.P": 1e5+dP, "outlet.P": 1e5, "inlet.rho": rho, "valve.A_frac": 0.5}
+    out_full = v.compute_outputs(0.0, {}, inputs_full)
+    out_half = v.compute_outputs(0.0, {}, inputs_half)
+    assert abs(out_half["mdot"] - 0.5 * out_full["mdot"]) / out_full["mdot"] < 1e-6
+
+
+def test_valve_closed_zero_flow():
+    v = Valve("v1", max_area=1e-3)
+    inputs = {"inlet.P": 2e5, "outlet.P": 1e5, "inlet.rho": 1000.0, "valve.A_frac": 0.0}
+    out = v.compute_outputs(0.0, {}, inputs)
+    assert out["mdot"] == 0.0
+
+
+def test_valve_reverse_flow():
+    v = Valve("v1", max_area=1e-3, discharge_coeff=1.0)
+    inputs = {"inlet.P": 1e5, "outlet.P": 2e5, "inlet.rho": 1000.0, "valve.A_frac": 1.0}
+    out = v.compute_outputs(0.0, {}, inputs)
+    assert out["mdot"] < 0.0
+
+
+# ── MetalNode tests ───────────────────────────────────────────────────────────
+
+from atha.components.metal_node import MetalNode
+
+
+def test_metal_node_has_one_state():
+    mn = MetalNode("wall", mass=1.0)
+    assert mn.n_states == 1
+    assert mn.state_names == ["T_wall"]
+
+
+def test_metal_node_heating_rate():
+    # 1 kg steel, 1000 W heat, no cooling: dT/dt = 1000/500 = 2 K/s
+    mn = MetalNode("wall", mass=1.0, cp_metal=500.0, initial_T=300.0)
+    states = {"T_wall": 300.0}
+    inputs = {"hot_side.Q_dot": 1000.0, "cool_side.Q_dot": 0.0}
+    outputs = mn.compute_outputs(0.0, states, inputs)
+    derivs = mn.get_state_derivatives(0.0, states, inputs, outputs)
+    assert abs(derivs["T_wall"] - 2.0) < 1e-10
+
+
+def test_metal_node_cooling_drops_temperature():
+    mn = MetalNode("wall", mass=1.0, cp_metal=500.0)
+    states = {"T_wall": 600.0}
+    inputs = {"hot_side.Q_dot": 0.0, "cool_side.Q_dot": 500.0}
+    outputs = mn.compute_outputs(0.0, states, inputs)
+    derivs = mn.get_state_derivatives(0.0, states, inputs, outputs)
+    assert derivs["T_wall"] < 0.0
+
+
+def test_metal_node_thermal_equilibrium():
+    mn = MetalNode("wall", mass=2.0, cp_metal=500.0)
+    states = {"T_wall": 400.0}
+    inputs = {"hot_side.Q_dot": 1000.0, "cool_side.Q_dot": 1000.0}
+    outputs = mn.compute_outputs(0.0, states, inputs)
+    derivs = mn.get_state_derivatives(0.0, states, inputs, outputs)
+    assert abs(derivs["T_wall"]) < 1e-10
+
+
+def test_metal_node_initialize():
+    mn = MetalNode("wall", mass=1.0, initial_T=800.0)
+    assert abs(mn._state_values["T_wall"] - 800.0) < 1e-10
+
+
+# ── Pump tests ────────────────────────────────────────────────────────────────
+
+from atha.components.pump import Pump
+
+
+def test_pump_no_states():
+    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
+    assert p.n_states == 0
+
+
+def test_pump_design_point():
+    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0, efficiency=1.0)
+    inputs = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
+    out = p.compute_outputs(0.0, {}, inputs)
+    assert abs(out["delta_P"] - 1e6) < 1.0  # design point pressure rise
+    # Power = mdot * dP / (rho * eta) = 10 * 1e6 / (1000 * 1.0) = 10000 W
+    assert abs(out["power"] - 10000.0) < 1.0
+
+
+def test_pump_speed_scaling():
+    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
+    inputs_design = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
+    inputs_half   = {"shaft.omega":  500.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
+    out_d = p.compute_outputs(0.0, {}, inputs_design)
+    out_h = p.compute_outputs(0.0, {}, inputs_half)
+    # dP scales as omega^2: half speed → quarter pressure
+    assert abs(out_h["delta_P"] - out_d["delta_P"] * 0.25) / out_d["delta_P"] < 1e-6
+
+
+def test_pump_tau_positive():
+    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
+    inputs = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
+    out = p.compute_outputs(0.0, {}, inputs)
+    assert out["tau_load"] > 0.0  # pump is a load on the shaft
+
+
+# ── Turbine tests ─────────────────────────────────────────────────────────────
+
+from atha.components.turbine import Turbine
+
+
+def test_turbine_no_states():
+    gas = IdealGasBackend(gamma=1.4, R=287.0)
+    t = Turbine("t1", thermo=gas)
+    assert t.n_states == 0
+
+
+def test_turbine_power_positive():
+    gas = IdealGasBackend(gamma=1.4, R=287.0)
+    t = Turbine("t1", thermo=gas, efficiency=1.0)
+    h_in = gas.cp * 1000.0  # 1000 K
+    P_in, P_out = 2e5, 1e5
+    state_in = gas.state_from_PT(P_in, 1000.0)
+    inputs = {"inlet.P": P_in, "inlet.h": state_in.h, "outlet.P": P_out,
+              "inlet.mdot": 1.0, "shaft.omega": 100.0}
+    out = t.compute_outputs(0.0, {}, inputs)
+    assert out["power"] > 0.0
+    assert out["tau_drive"] > 0.0
+
+
+def test_turbine_isentropic_power():
+    gas = IdealGasBackend(gamma=1.4, R=287.0)
+    t = Turbine("t1", thermo=gas, efficiency=1.0)
+    T_in, P_in, P_out = 1000.0, 2e5, 1e5
+    state_in = gas.state_from_PT(P_in, T_in)
+    T_out_s = T_in * (P_out / P_in) ** ((1.4 - 1) / 1.4)
+    expected_dh = gas.cp * (T_in - T_out_s)
+    inputs = {"inlet.P": P_in, "inlet.h": state_in.h, "outlet.P": P_out,
+              "inlet.mdot": 2.0, "shaft.omega": 100.0}
+    out = t.compute_outputs(0.0, {}, inputs)
+    assert abs(out["delta_h"] - expected_dh) / expected_dh < 1e-6
+    assert abs(out["power"] - 2.0 * expected_dh) / out["power"] < 1e-6
+
+
+def test_turbine_efficiency_reduces_power():
+    gas = IdealGasBackend(gamma=1.4, R=287.0)
+    t_ideal = Turbine("t1", thermo=gas, efficiency=1.0)
+    t_real  = Turbine("t2", thermo=gas, efficiency=0.85)
+    state_in = gas.state_from_PT(5e5, 1200.0)
+    inputs = {"inlet.P": 5e5, "inlet.h": state_in.h, "outlet.P": 1e5,
+              "inlet.mdot": 5.0, "shaft.omega": 200.0}
+    out_i = t_ideal.compute_outputs(0.0, {}, inputs)
+    out_r = t_real.compute_outputs(0.0, {}, inputs)
+    assert abs(out_r["power"] - 0.85 * out_i["power"]) / out_i["power"] < 1e-6
+
+
+# ── Nozzle tests ──────────────────────────────────────────────────────────────
+
+from atha.components.nozzle import Nozzle
+
+
+def test_nozzle_no_states():
+    gas = IdealGasBackend(gamma=1.4, R=287.0)
+    n = Nozzle("n1", throat_area=0.01, exit_area=0.77, thermo=gas)
+    assert n.n_states == 0
+
+
+def test_nozzle_thrust_positive():
+    gas = IdealGasBackend(gamma=1.2, R=520.0)
+    n = Nozzle("n1", throat_area=0.0687, exit_area=5.29, thermo=gas,
+               ambient_pressure=0.0, discharge_coeff=1.0,
+               eta_velocity=1.0, eta_divergence=1.0)
+    state_in = gas.state_from_PT(20e6, 3600.0)
+    inputs = {"inlet.P": 20e6, "inlet.h": state_in.h, "inlet.mdot": 668.0}
+    out = n.compute_outputs(0.0, {}, inputs)
+    assert out["thrust"] > 0.0
+    assert out["Cf"] > 1.0  # vacuum Cf for high expansion ratio
+
+
+def test_nozzle_higher_Pc_higher_thrust():
+    gas = IdealGasBackend(gamma=1.2, R=520.0)
+    n = Nozzle("n1", throat_area=0.0687, exit_area=5.29, thermo=gas,
+               ambient_pressure=0.0)
+    state_lo = gas.state_from_PT(10e6, 3600.0)
+    state_hi = gas.state_from_PT(20e6, 3600.0)
+    out_lo = n.compute_outputs(0.0, {}, {"inlet.P": 10e6, "inlet.h": state_lo.h, "inlet.mdot": 334.0})
+    out_hi = n.compute_outputs(0.0, {}, {"inlet.P": 20e6, "inlet.h": state_hi.h, "inlet.mdot": 668.0})
+    assert out_hi["thrust"] > out_lo["thrust"]
+
+
+# ── CombustionChamber tests ───────────────────────────────────────────────────
+
+from atha.components.combustion_chamber import CombustionChamber
+
+
+def test_combustion_chamber_has_two_states():
+    gas = IdealGasBackend(gamma=1.2, R=520.0)
+    cc = CombustionChamber("cc", volume=0.05, thermo=gas, T_adiabatic=3600.0,
+                            initial_P=20e6, initial_T=3400.0)
+    assert cc.n_states == 2
+    assert "P" in cc.state_names
+    assert "h" in cc.state_names
+
+
+def test_combustion_chamber_pressure_rises_with_inflow():
+    gas = IdealGasBackend(gamma=1.2, R=520.0)
+    cc = CombustionChamber("cc", volume=0.05, thermo=gas, T_adiabatic=3600.0,
+                            initial_P=20e6, initial_T=3400.0)
+    state = gas.state_from_PT(20e6, 3400.0)
+    states = {"P": 20e6, "h": state.h}
+    inputs = {"fuel_inlet.mdot": 80.0, "ox_inlet.mdot": 480.0, "outlet.mdot": 550.0}
+    outputs = cc.compute_outputs(0.0, states, inputs)
+    derivs = cc.get_state_derivatives(0.0, states, inputs, outputs)
+    # Net inflow > outflow → pressure rises
+    assert derivs["P"] > 0.0
+
+
+def test_combustion_chamber_initialize():
+    gas = IdealGasBackend(gamma=1.2, R=520.0)
+    cc = CombustionChamber("cc", volume=0.05, thermo=gas, T_adiabatic=3600.0)
+    cc.initialize({"P": 15e6, "T": 3200.0})
+    assert abs(cc._state_values["P"] - 15e6) < 1.0
+
+
+# ── Preburner tests ───────────────────────────────────────────────────────────
+
+from atha.components.preburner import Preburner
+
+
+def test_preburner_is_combustion_chamber():
+    gas = IdealGasBackend(gamma=1.3, R=350.0)
+    pb = Preburner("pb", volume=0.01, thermo=gas, T_adiabatic=900.0,
+                   initial_P=30e6, initial_T=800.0)
+    assert pb.n_states == 2
+    state = gas.state_from_PT(30e6, 800.0)
+    states = {"P": 30e6, "h": state.h}
+    inputs = {"fuel_inlet.mdot": 200.0, "ox_inlet.mdot": 20.0, "outlet.mdot": 210.0}
+    outputs = pb.compute_outputs(0.0, states, inputs)
+    derivs = pb.get_state_derivatives(0.0, states, inputs, outputs)
+    assert isinstance(derivs["P"], float)
