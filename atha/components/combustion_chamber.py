@@ -1,6 +1,6 @@
 # atha/components/combustion_chamber.py
 from __future__ import annotations
-from typing import Dict
+from typing import Dict, Optional
 from atha.core.component import BaseComponent
 from atha.core.port import FluidPort, PortDirection
 from atha.thermo.interface import ThermoBackend
@@ -12,18 +12,24 @@ class CombustionChamber(BaseComponent):
 
     States: P [Pa], h [J/kg]
 
-    Ports:
-        fuel_inlet  (FluidPort, INLET)
-        ox_inlet    (FluidPort, INLET)
-        outlet      (FluidPort, OUTLET)
+    Ports
+    -----
+    lox_inlet   FluidPort INLET   (also accessible as ox_inlet)
+    fuel_inlet  FluidPort INLET
+    outlet      FluidPort OUTLET
 
-    Parameters:
-        volume       [m^3]
-        thermo       ThermoBackend
-        T_adiabatic  [K]    adiabatic flame temperature target
-        eta_cstar    [-]    combustion efficiency, default 0.975
-        initial_P    [Pa]   default 1e5
-        initial_T    [K]    default 300.0
+    Parameters
+    ----------
+    volume       m³
+    thermo       ThermoBackend
+    fuel         str   fuel species name (e.g. "CH4", "C2H5OH")
+    oxidizer     str   oxidizer species name (e.g. "O2")
+    efficiency   -     combustion efficiency (η_c*), default 0.975
+    design_MR    -     design mixture ratio (stored, not used in physics)
+    initial_P    Pa    default 1e5
+    initial_T    K     default 300.0
+    T_adiabatic  K     adiabatic flame temperature; defaults to initial_T
+    eta_cstar    -     legacy alias for efficiency
     """
 
     def __init__(
@@ -31,23 +37,34 @@ class CombustionChamber(BaseComponent):
         name: str,
         volume: float,
         thermo: ThermoBackend,
-        T_adiabatic: float,
-        eta_cstar: float = 0.975,
+        fuel: str = "H2",
+        oxidizer: str = "O2",
+        efficiency: float = 0.975,
+        design_MR: Optional[float] = None,
         initial_P: float = 1e5,
         initial_T: float = 300.0,
+        # Legacy params kept for backward compatibility
+        T_adiabatic: Optional[float] = None,
+        eta_cstar: Optional[float] = None,
     ) -> None:
         self._volume = volume
         self._thermo = thermo
-        self._T_adiabatic = T_adiabatic
-        self._eta_cstar = eta_cstar
+        self._fuel = fuel
+        self._oxidizer = oxidizer
+        self._eta_cstar = eta_cstar if eta_cstar is not None else efficiency
+        self._design_MR = design_MR
         self._initial_P = initial_P
         self._initial_T = initial_T
+        # T_adiabatic: use explicit value if given, else use initial_T as proxy
+        self._T_adiabatic = T_adiabatic if T_adiabatic is not None else initial_T
         super().__init__(name)
 
     def _declare_ports(self) -> None:
-        self._register_port("fuel_inlet", FluidPort("fuel_inlet", PortDirection.INLET, self))
-        self._register_port("ox_inlet", FluidPort("ox_inlet", PortDirection.INLET, self))
-        self._register_port("outlet", FluidPort("outlet", PortDirection.OUTLET, self))
+        lox_p = FluidPort("lox_inlet", PortDirection.INLET, self)
+        self._register_port("lox_inlet", lox_p)
+        self._register_port("ox_inlet",  lox_p)   # alias
+        self._register_port("fuel_inlet", FluidPort("fuel_inlet", PortDirection.INLET,  self))
+        self._register_port("outlet",     FluidPort("outlet",     PortDirection.OUTLET, self))
 
     def _declare_states(self) -> None:
         self._register_state("P", self._initial_P)
@@ -63,11 +80,17 @@ class CombustionChamber(BaseComponent):
         states: Dict[str, float],
         inputs: Dict[str, float],
     ) -> Dict[str, float]:
-        fs = self._thermo.state_from_Ph(states["P"], states["h"])
+        P = states.get("P", self._initial_P)
+        h = states.get("h", self._thermo.state_from_PT(self._initial_P, self._initial_T).h)
+        fs = self._thermo.state_from_Ph(P, h)
+        # Cache T so examples can read _state_values["T"]
+        self._state_values["T"] = fs.T
         return {
             "fluid_state": fs,
             "T": fs.T,
+            "P": P,
             "rho": fs.rho,
+            "gamma": fs.gamma,
         }
 
     def get_state_derivatives(
@@ -82,38 +105,30 @@ class CombustionChamber(BaseComponent):
         m = fs.rho * V
         R_eff = fs.cp - fs.cv
 
+        mdot_lox  = inputs.get("lox_inlet.mdot",  inputs.get("ox_inlet.mdot", 0.0))
         mdot_fuel = inputs.get("fuel_inlet.mdot", 0.0)
-        mdot_ox = inputs.get("ox_inlet.mdot", 0.0)
-        mdot_out = inputs.get("outlet.mdot", 0.0)
-        mdot_total_in = mdot_fuel + mdot_ox
-        mdot_net = mdot_total_in - mdot_out
+        mdot_out  = inputs.get("outlet.mdot", 0.0)
+        mdot_in   = mdot_lox + mdot_fuel
+        mdot_net  = mdot_in - mdot_out
 
-        # Combustion: effective enthalpy = eta_cstar * h at adiabatic flame T
-        if mdot_total_in > 1e-12:
-            h_combustion = self._eta_cstar * self._thermo.state_from_PT(
-                states["P"], self._T_adiabatic
-            ).h
-            h_in_flux = mdot_total_in * h_combustion
+        P = states.get("P", self._initial_P)
+        h = states.get("h", 0.0)
+
+        # Combustion: effective enthalpy at adiabatic flame temp * efficiency
+        if mdot_in > 1e-12:
+            h_ad = self._thermo.state_from_PT(P, self._T_adiabatic).h
+            h_in_flux = mdot_in * self._eta_cstar * h_ad
         else:
             h_in_flux = 0.0
 
-        h_out_flux = mdot_out * states["h"]
+        h_out_flux = mdot_out * h
 
-        # Pressure ODE
         dP_dt = (fs.gamma * R_eff * fs.T / V) * (mdot_net / fs.rho)
-
-        # Enthalpy ODE
         dh_dt = (1.0 / m) * (h_in_flux - h_out_flux - V * dP_dt)
 
         return {"P": dP_dt, "h": dh_dt}
 
-    def get_residuals(
-        self,
-        t: float,
-        states: Dict[str, float],
-        inputs: Dict[str, float],
-        outputs: Dict[str, float],
-    ) -> Dict[str, float]:
+    def get_residuals(self, t, states, inputs, outputs):
         return {}
 
     def initialize(self, operating_point: Dict[str, float]) -> None:
@@ -121,3 +136,4 @@ class CombustionChamber(BaseComponent):
         T = operating_point.get("T", self._initial_T)
         self._state_values["P"] = P
         self._state_values["h"] = self._thermo.state_from_PT(P, T).h
+        self._state_values["T"] = T

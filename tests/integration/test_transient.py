@@ -47,13 +47,15 @@ def test_pressure_decay_transient():
 
 def test_rotor_spin_up_transient():
     """Rotor under constant drive torque: omega increases from zero."""
-    rotor = Rotor("rotor", inertia=5.0, friction_coeff=0.1, initial_omega=0.0)
+    rotor = Rotor("rotor", moment_of_inertia=5.0, friction_coeff=0.1)
+    rotor.port("turbine_in")  # drive (INLET)
+    rotor.port("pump_out")    # load  (OUTLET)
     engine = Engine("e")
     engine.add_component(rotor)
     layout = engine.compile()
     X0 = layout.assemble_state_vector()
     def bcs(t):
-        return {"shaft_in.tau": 50.0, "shaft_out.tau": 0.0}
+        return {"turbine_in.tau": 50.0, "pump_out.tau": 0.0}
     solver = TransientSolver(layout, method="Radau", max_step=0.05)
     result = solver.integrate((0.0, 5.0), X0, bcs)
     omega = result.get("rotor", "omega")
@@ -64,7 +66,9 @@ def test_rotor_spin_up_transient():
 
 def test_rotor_reaches_steady_state():
     """Rotor settles to omega = tau_net / friction_coeff."""
-    rotor = Rotor("rotor", inertia=1.0, friction_coeff=2.0, initial_omega=0.0)
+    rotor = Rotor("rotor", moment_of_inertia=1.0, friction_coeff=2.0)
+    rotor.port("turbine_in")
+    rotor.port("pump_out")
     engine = Engine("e")
     engine.add_component(rotor)
     layout = engine.compile()
@@ -73,7 +77,7 @@ def test_rotor_reaches_steady_state():
     k_f = 2.0
     omega_ss = tau_drive / k_f  # 50 rad/s
     def bcs(t):
-        return {"shaft_in.tau": tau_drive, "shaft_out.tau": 0.0}
+        return {"turbine_in.tau": tau_drive, "pump_out.tau": 0.0}
     solver = TransientSolver(layout, method="Radau", max_step=0.05)
     result = solver.integrate((0.0, 20.0), X0, bcs)
     omega = result.get("rotor", "omega")

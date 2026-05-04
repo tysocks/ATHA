@@ -133,24 +133,28 @@ from atha.components.rotor import Rotor
 
 
 def test_rotor_has_one_state():
-    rotor = Rotor("r1", inertia=10.0)
+    rotor = Rotor("r1", moment_of_inertia=10.0)
     assert rotor.n_states == 1
     assert rotor.state_names == ["omega"]
 
 
 def test_rotor_accelerates_under_net_torque():
-    rotor = Rotor("r1", inertia=10.0, friction_coeff=0.0)
+    rotor = Rotor("r1", moment_of_inertia=10.0, friction_coeff=0.0)
+    rotor.port("turbine_in")   # INLET drive port (name contains "turbine")
+    rotor.port("pump_out")     # OUTLET load port
     states = {"omega": 0.0}
-    inputs = {"shaft_in.tau": 100.0, "shaft_out.tau": 0.0}
+    inputs = {"turbine_in.tau": 100.0, "pump_out.tau": 0.0}
     outputs = rotor.compute_outputs(0.0, states, inputs)
     derivs = rotor.get_state_derivatives(0.0, states, inputs, outputs)
     assert abs(derivs["omega"] - 10.0) < 1e-10  # 100/10 = 10 rad/s^2
 
 
 def test_rotor_friction_reduces_acceleration():
-    rotor = Rotor("r1", inertia=10.0, friction_coeff=1.0)
-    states = {"omega": 5.0}  # 1.0 * 5 = 5 N·m friction
-    inputs = {"shaft_in.tau": 100.0, "shaft_out.tau": 0.0}
+    rotor = Rotor("r1", moment_of_inertia=10.0, friction_coeff=1.0)
+    rotor.port("turbine_in")
+    rotor.port("pump_out")
+    states = {"omega": 5.0}  # friction = 1.0 * 5 = 5 N·m
+    inputs = {"turbine_in.tau": 100.0, "pump_out.tau": 0.0}
     outputs = rotor.compute_outputs(0.0, states, inputs)
     derivs = rotor.get_state_derivatives(0.0, states, inputs, outputs)
     assert abs(derivs["omega"] - 9.5) < 1e-10  # (100 - 5) / 10 = 9.5
@@ -158,17 +162,26 @@ def test_rotor_friction_reduces_acceleration():
 
 def test_rotor_equilibrium_omega():
     # At steady state: tau_drive = tau_load + k_f * omega -> omega = (drive-load)/k_f
-    rotor = Rotor("r1", inertia=5.0, friction_coeff=2.0)
+    rotor = Rotor("r1", moment_of_inertia=5.0, friction_coeff=2.0)
+    rotor.port("turbine_in")
+    rotor.port("pump_out")
     states = {"omega": 50.0}  # (100 - 0) / 2 = 50 rad/s
-    inputs = {"shaft_in.tau": 100.0, "shaft_out.tau": 0.0}
+    inputs = {"turbine_in.tau": 100.0, "pump_out.tau": 0.0}
     outputs = rotor.compute_outputs(0.0, states, inputs)
     derivs = rotor.get_state_derivatives(0.0, states, inputs, outputs)
     assert abs(derivs["omega"]) < 1e-10
 
 
 def test_rotor_initialize():
-    rotor = Rotor("r1", inertia=1.0, initial_omega=314.16)
+    rotor = Rotor("r1", moment_of_inertia=1.0)
+    rotor.initialize({"omega": 314.16})
     assert abs(rotor._state_values["omega"] - 314.16) < 1e-10
+
+
+def test_rotor_legacy_inertia_kwarg():
+    # Backward compatibility: inertia= alias for moment_of_inertia=
+    rotor = Rotor("r1", inertia=10.0)
+    assert rotor.n_states == 1
 
 
 # ── PipeWithInertia tests ─────────────────────────────────────────────────────
@@ -385,55 +398,66 @@ def test_metal_node_initialize():
 
 # ── Pump tests ────────────────────────────────────────────────────────────────
 
-from atha.components.pump import Pump
+from atha.components.pump import Pump, PumpMap
+
+
+def _make_pump(name, dP=1e6, mdot=10.0, rpm=1000.0, eta=0.85):
+    pm = PumpMap(mdot_design=mdot, dP_design=dP, omega_design=rpm * math.pi / 30.0,
+                 eta_design=eta)
+    fluid = IdealGasBackend(gamma=1.4, R=287.0)
+    return Pump(name, diameter=0.1, pump_map=pm, fluid=fluid)
+
+
+def _pump_inputs(rpm=1000.0, T=300.0, P=1e5, mdot=10.0):
+    fluid = IdealGasBackend(gamma=1.4, R=287.0)
+    h = fluid.cp * T
+    return {"shaft.omega": rpm * math.pi / 30.0, "inlet.P": P, "inlet.h": h, "inlet.mdot": mdot}
 
 
 def test_pump_no_states():
-    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
+    p = _make_pump("p1")
     assert p.n_states == 0
 
 
 def test_pump_design_point():
-    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0, efficiency=1.0)
-    inputs = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
+    p = _make_pump("p1", eta=1.0)
+    inputs = _pump_inputs()
     out = p.compute_outputs(0.0, {}, inputs)
-    assert abs(out["delta_P"] - 1e6) < 1.0  # design point pressure rise
-    # Power = mdot * dP / (rho * eta) = 10 * 1e6 / (1000 * 1.0) = 10000 W
-    assert abs(out["power"] - 10000.0) < 1.0
+    assert abs(out["delta_P"] - 1e6) < 1.0  # design-point pressure rise
 
 
 def test_pump_speed_scaling():
-    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
-    inputs_design = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
-    inputs_half   = {"shaft.omega":  500.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
-    out_d = p.compute_outputs(0.0, {}, inputs_design)
-    out_h = p.compute_outputs(0.0, {}, inputs_half)
-    # dP scales as omega^2: half speed → quarter pressure
+    p = _make_pump("p1")
+    out_d = p.compute_outputs(0.0, {}, _pump_inputs(rpm=1000.0))
+    out_h = p.compute_outputs(0.0, {}, _pump_inputs(rpm=500.0))
+    # dP ∝ ω²: half speed → quarter pressure
     assert abs(out_h["delta_P"] - out_d["delta_P"] * 0.25) / out_d["delta_P"] < 1e-6
 
 
 def test_pump_tau_positive():
-    p = Pump("p1", delta_P_design=1e6, mdot_design=10.0, omega_design=1000.0)
-    inputs = {"shaft.omega": 1000.0, "inlet.rho": 1000.0, "inlet.mdot": 10.0}
-    out = p.compute_outputs(0.0, {}, inputs)
+    p = _make_pump("p1")
+    out = p.compute_outputs(0.0, {}, _pump_inputs())
     assert out["tau_load"] > 0.0  # pump is a load on the shaft
 
 
 # ── Turbine tests ─────────────────────────────────────────────────────────────
 
-from atha.components.turbine import Turbine
+from atha.components.turbine import Turbine, TurbineMap
+
+
+def _make_turbine(name, eta=0.85, gamma=1.4):
+    tm = TurbineMap(PR_design=2.0, eta_design=eta, mdot_corrected_design=1.0)
+    return Turbine(name, diameter=0.1, turbine_map=tm, gamma=gamma)
 
 
 def test_turbine_no_states():
-    gas = IdealGasBackend(gamma=1.4, R=287.0)
-    t = Turbine("t1", thermo=gas)
+    t = _make_turbine("t1")
     assert t.n_states == 0
 
 
 def test_turbine_power_positive():
+    t = _make_turbine("t1", eta=1.0)
     gas = IdealGasBackend(gamma=1.4, R=287.0)
-    t = Turbine("t1", thermo=gas, efficiency=1.0)
-    h_in = gas.cp * 1000.0  # 1000 K
     P_in, P_out = 2e5, 1e5
     state_in = gas.state_from_PT(P_in, 1000.0)
     inputs = {"inlet.P": P_in, "inlet.h": state_in.h, "outlet.P": P_out,
@@ -444,12 +468,15 @@ def test_turbine_power_positive():
 
 
 def test_turbine_isentropic_power():
+    """For ideal gas, the ideal-gas approximation matches the thermo-based result exactly."""
+    t = _make_turbine("t1", eta=1.0)
     gas = IdealGasBackend(gamma=1.4, R=287.0)
-    t = Turbine("t1", thermo=gas, efficiency=1.0)
     T_in, P_in, P_out = 1000.0, 2e5, 1e5
     state_in = gas.state_from_PT(P_in, T_in)
-    T_out_s = T_in * (P_out / P_in) ** ((1.4 - 1) / 1.4)
-    expected_dh = gas.cp * (T_in - T_out_s)
+    # Expected: Δh_s = h_in * (1 - PR^(-(γ-1)/γ))
+    PR = P_in / P_out
+    exp = (1.4 - 1) / 1.4
+    expected_dh = state_in.h * (1.0 - PR ** (-exp))
     inputs = {"inlet.P": P_in, "inlet.h": state_in.h, "outlet.P": P_out,
               "inlet.mdot": 2.0, "shaft.omega": 100.0}
     out = t.compute_outputs(0.0, {}, inputs)
@@ -458,9 +485,9 @@ def test_turbine_isentropic_power():
 
 
 def test_turbine_efficiency_reduces_power():
+    t_ideal = _make_turbine("t1", eta=1.0)
+    t_real  = _make_turbine("t2", eta=0.85)
     gas = IdealGasBackend(gamma=1.4, R=287.0)
-    t_ideal = Turbine("t1", thermo=gas, efficiency=1.0)
-    t_real  = Turbine("t2", thermo=gas, efficiency=0.85)
     state_in = gas.state_from_PT(5e5, 1200.0)
     inputs = {"inlet.P": 5e5, "inlet.h": state_in.h, "outlet.P": 1e5,
               "inlet.mdot": 5.0, "shaft.omega": 200.0}

@@ -20,6 +20,20 @@ class Valve(BaseComponent):
     Parameters:
         max_area        [m^2]
         discharge_coeff [-]   default 0.98
+
+    Optional PerformanceMap overrides
+    ----------------------------------
+    cd_map : PerformanceMap
+        Replaces the scalar ``discharge_coeff``.  Must output ``"Cd"``.
+        Context axes available: "inlet.P", "outlet.P", "inlet.rho",
+        "valve.A_frac", and any other BCS keys.
+
+    cda_map : PerformanceMap
+        Provides the effective Cd*A product directly, bypassing both the
+        scalar ``discharge_coeff`` and ``max_area``.  Must output ``"CdA"``.
+        ``valve.A_frac`` is NOT applied when ``cda_map`` is used — the map
+        is expected to encode area-fraction dependence in its axes.
+        Takes precedence over ``cd_map``.
     """
 
     def __init__(
@@ -27,9 +41,13 @@ class Valve(BaseComponent):
         name: str,
         max_area: float,
         discharge_coeff: float = 0.98,
+        cd_map=None,
+        cda_map=None,
     ) -> None:
         self._max_area = max_area
         self._discharge_coeff = discharge_coeff
+        self._cd_map = cd_map
+        self._cda_map = cda_map
         super().__init__(name)
 
     def _declare_ports(self) -> None:
@@ -53,17 +71,23 @@ class Valve(BaseComponent):
         rho = inputs.get("inlet.rho", 1.0)
         A_frac = inputs.get("valve.A_frac", 1.0)
 
+        context: Dict[str, float] = dict(states)
+        context.update(inputs)
+
+        if self._cda_map is not None:
+            CdA = self._cda_map.evaluate(context)["CdA"]
+        elif self._cd_map is not None:
+            Cd = self._cd_map.evaluate(context)["Cd"]
+            CdA = Cd * A_frac * self._max_area
+        else:
+            CdA = self._discharge_coeff * A_frac * self._max_area
+
         dP = P_in - P_out
         if dP == 0.0:
             mdot = 0.0
         else:
-            mdot = (
-                self._discharge_coeff
-                * A_frac
-                * self._max_area
-                * math.sqrt(2.0 * rho * abs(dP))
-                * math.copysign(1.0, dP)
-            )
+            mdot = CdA * math.sqrt(2.0 * rho * abs(dP)) * math.copysign(1.0, dP)
+
         return {"mdot": mdot, "A_frac": A_frac}
 
     def get_state_derivatives(

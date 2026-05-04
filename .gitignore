@@ -1,0 +1,23 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / env
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# IDE / local
+.claude/
+.idea/
+.vscode/
+
+# Example and MC outputs (regenerate locally)
+outputs/

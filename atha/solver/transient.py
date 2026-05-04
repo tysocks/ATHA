@@ -11,6 +11,7 @@ class TransientSolution:
     t: np.ndarray
     X: np.ndarray
     state_names: List[str]
+    t_events: Optional[list] = None
 
     def get(self, component_name, state_name):
         key = f"{component_name}.{state_name}"
@@ -55,4 +56,6 @@ class TransientSolver:
         if not sol.success:
             raise RuntimeError(f"Transient integration failed: {sol.message}")
 
-        return TransientSolution(t=sol.t, X=sol.y.T, state_names=layout.all_state_names())
+        t_events = [arr.tolist() for arr in sol.t_events] if sol.t_events is not None else None
+        return TransientSolution(t=sol.t, X=sol.y.T, state_names=layout.all_state_names(),
+                                 t_events=t_events)

@@ -22,6 +22,7 @@ class BaseComponent(ABC):
         self._state_values: Dict[str, float] = {}
         self._alg_names: List[str] = []
         self._params: Dict[str, Any] = {}
+        self.last_outputs: Dict[str, Any] = {}
         self._declare_ports()
         self._declare_states()
         self._declare_algebraic_vars()
