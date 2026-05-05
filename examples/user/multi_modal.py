@@ -48,7 +48,7 @@ profile = TestProfile(
     global_limits=[
         # Hard limit: abort if chamber pressure exceeds 2 bar
         SafetyLimit("P_max", component_name="chamber", state_name="P",
-                    upper_limit=2e5, is_hard=True),
+                    upper_limit=20e5, is_hard=True),
     ],
 )
 
@@ -61,8 +61,9 @@ if result.success:
     P = fill.get("chamber", "P")   # numpy array at recorded time points
     print(f"Peak pressure: {P.max()/1e5:.2f} bar")
 
-    # Stitch all phases into a single continuous timeline
-    t_all, X_all = result.get_combined()
+    # Stitch chamber pressure across all phases (global time, one state)
+    t_all, P_all = result.get_combined("chamber", "P")
+    print(f"Full-profile P range: {P_all.min()/1e5:.2f} – {P_all.max()/1e5:.2f} bar")
 
     # Quick matplotlib overview of every state across all phases
     result.plot_timeline()

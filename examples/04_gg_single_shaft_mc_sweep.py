@@ -41,7 +41,6 @@ from atha.thermo.coolprop_backend import CoolPropBackend
 from atha.thermo.cantera_backend import CanteraBackend
 from atha.jannaf.efficiency import JANNAFEfficiencies
 from atha.solver.steady_state import SteadyStateSolver
-from atha.analysis import ComponentRig
 from atha.monte_carlo import MonteCarloRunner, UncertainParameter, ParameterType
 
 # ---------------------------------------------------------------------------
@@ -235,25 +234,20 @@ if __name__ == "__main__":
     mc_result.save("outputs/gg_thrust_mc_500.hdf5")
 
     # ---------------------------------------------------------------------------
-    # 3. Speed sweep — throttle envelope via pump / turbine shaft speed
+    # 3. Speed sweep — throttle envelope via turbopump shaft speed
     #
-    # SteadyStateSolver does not propagate rotor omega to pumps; head uses
-    # ``inputs['shaft.omega']`` on each Pump/Turbine. Sweep by setting those BCs
-    # (not ``shaft.omega_override``, which only clamps the rotor state).
-    #
-    # Note: Pc / thrust may still look flat until the solver wires fluid ports
-    # (e.g. injector mdot, chamber inflows) from upstream ``compute_outputs``;
-    # this sweep does correctly vary pump ΔP vs the angular speeds below.
+    # ``shaft.omega_override`` drives the rotor state to the target speed via a
+    # stiff spring in the ODE (see Rotor.get_state_derivatives). The solver
+    # propagates the resulting shaft omega to pumps and turbine automatically
+    # through port connections, varying pump discharge pressure and chamber
+    # pressure with speed.
     # ---------------------------------------------------------------------------
-    shaft_rig = ComponentRig(eng["shaft"])   # noqa: F841
 
     def evaluate_at_speed(X: dict) -> dict:
         lay, e = build_engine()
         omega = float(X["omega"])
         bcs_sw = dict(bcs)
-        bcs_sw["lox_pump.shaft.omega"] = omega
-        bcs_sw["fuel_pump.shaft.omega"] = omega
-        bcs_sw["turbine.shaft.omega"] = omega
+        bcs_sw["shaft.omega_override"] = omega
         X_sol = SteadyStateSolver(lay).solve(lay.assemble_state_vector(), bcs_sw)
         lay.scatter_state_vector(X_sol)
         return {

@@ -281,20 +281,17 @@ mc_result.plot_histogram(bins=30, title="GG LOX/CH4 — Vacuum Thrust Distributi
 mc_result.save("outputs/gg_ch4_thrust_mc_300.hdf5")
 
 # ---------------------------------------------------------------------------
-# 3. Speed sweep — thrust envelope via pump / turbine shaft speed (hydraulic path)
+# 3. Speed sweep — thrust envelope via turbopump shaft speed
 #
-# Same as example 04: use ``*.shaft.omega`` on pumps and turbine (what those
-# components read), not ``shaft.omega_override`` on the rotor alone.
+# ``shaft.omega_override`` drives the rotor state to the target speed; the
+# solver propagates omega to pumps and turbine through port connections so
+# pump discharge pressure and chamber pressure vary correctly with speed.
 # ---------------------------------------------------------------------------
 def evaluate_at_speed(X: dict) -> dict:
     lay, e = build_engine()
     omega = float(X["omega"])
     bcs_sw = dict(bcs)
-    bcs_sw["lox_pump.shaft.omega"] = omega
-    bcs_sw["fuel_pump.shaft.omega"] = omega
-    bcs_sw["turbine.shaft.omega"] = omega
-    bcs_sw["gas.T"] = 3500.0
-    bcs_sw["gas.P"] = Pc_design
+    bcs_sw["shaft.omega_override"] = omega
     X_sol = SteadyStateSolver(lay).solve(lay.assemble_state_vector(), bcs_sw)
     lay.scatter_state_vector(X_sol)
     return {

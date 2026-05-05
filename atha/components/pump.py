@@ -128,11 +128,14 @@ class Pump(BaseComponent):
         h_in  = inputs.get("inlet.h", 0.0)
         mdot  = inputs.get("inlet.mdot", 0.0)
 
-        # Fluid density from inlet state
+        # Fluid state at inlet (density, temperature for downstream propagation)
         try:
-            rho = self._fluid.state_from_Ph(P_in, h_in).rho
+            _fs = self._fluid.state_from_Ph(P_in, h_in)
+            rho = _fs.rho
+            T_in = _fs.T
         except Exception:
             rho = 1000.0
+            T_in = 300.0
 
         delta_P = self._pump_map.delta_P(omega)
         P_out = P_in + delta_P
@@ -151,11 +154,18 @@ class Pump(BaseComponent):
         tau = W / max(abs(omega), 1.0)
 
         return {
-            "outlet.P":  P_out,
-            "outlet.h":  h_in,   # no enthalpy rise in ideal pump
-            "delta_P":   delta_P,
-            "power":     W,
-            "tau_load":  tau,
+            "outlet.P":   P_out,
+            "outlet.h":   h_in,   # no enthalpy rise in ideal pump
+            "outlet.T":   T_in,
+            "outlet.rho": rho,
+            # Bare keys propagate through any port connection (e.g. bleed ports)
+            "P":    P_out,
+            "h":    h_in,
+            "T":    T_in,
+            "rho":  rho,
+            "delta_P":    delta_P,
+            "power":      W,
+            "tau_load":   tau,
             "efficiency": eta,
         }
 

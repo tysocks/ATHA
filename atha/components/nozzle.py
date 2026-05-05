@@ -125,8 +125,24 @@ class Nozzle(BaseComponent):
         thrust     = Cf_del     * P_c * self._throat_area
         thrust_vac = Cf_del_vac * P_c * self._throat_area if self._cf_map is None else thrust
 
-        c_star = P_c * self._throat_area / max(abs(mdot), 1e-10)
-        Isp_vacuum = thrust_vac / (max(abs(mdot), 1e-10) * G0)
+        # Choked-throat mass flow from inlet density (ideal gas: rho = P/(R*T)).
+        # Using rho directly avoids needing R separately:
+        #   mdot_choked = Cd * At * P * sqrt(gamma/(R*T)) * Γ
+        #               = Cd * At * sqrt(gamma * rho * P) * Γ   (since rho = P/(R*T))
+        # Γ = (2/(γ+1))^((γ+1)/(2*(γ-1)))
+        rho_c = inputs.get("inlet.rho", 0.0)
+        if rho_c > 0.0:
+            choked_exp = (gamma + 1.0) / (2.0 * (gamma - 1.0))
+            choked_coeff = (2.0 / (gamma + 1.0)) ** choked_exp
+            mdot_choked = (self._eff.eta_Cd * self._throat_area
+                           * choked_coeff * (gamma * rho_c * P_c) ** 0.5)
+        else:
+            # Fall back to BCS-supplied mdot if rho unavailable
+            mdot_choked = abs(mdot)
+
+        mdot_eff = max(mdot_choked, 1e-10)
+        c_star = P_c * self._throat_area / mdot_eff
+        Isp_vacuum = thrust_vac / (mdot_eff * G0)
 
         return {
             "thrust":     thrust,
@@ -134,6 +150,7 @@ class Nozzle(BaseComponent):
             "Cf":         Cf_del,
             "c_star":     c_star,
             "Isp_vacuum": Isp_vacuum,
+            "mdot":       mdot_choked,
         }
 
     def get_state_derivatives(self, t, states, inputs, outputs):

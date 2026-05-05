@@ -80,9 +80,13 @@ class CombustionChamber(BaseComponent):
         states: Dict[str, float],
         inputs: Dict[str, float],
     ) -> Dict[str, float]:
-        P = states.get("P", self._initial_P)
+        P = max(states.get("P", self._initial_P), 1.0)  # clamp: Cantera rejects P <= 0
         h = states.get("h", self._thermo.state_from_PT(self._initial_P, self._initial_T).h)
-        fs = self._thermo.state_from_Ph(P, h)
+        try:
+            fs = self._thermo.state_from_Ph(P, h)
+        except Exception:
+            # Fallback when Newton wanders into unphysical (h, P) during iteration
+            fs = self._thermo.state_from_PT(P, self._initial_T)
         # Cache T so examples can read _state_values["T"]
         self._state_values["T"] = fs.T
         return {
@@ -111,16 +115,28 @@ class CombustionChamber(BaseComponent):
         mdot_in   = mdot_lox + mdot_fuel
         mdot_net  = mdot_in - mdot_out
 
-        P = states.get("P", self._initial_P)
+        P = max(states.get("P", self._initial_P), 1.0)
         h = states.get("h", 0.0)
 
-        # Combustion: effective enthalpy at adiabatic flame temp * efficiency
-        if mdot_in > 1e-12:
-            h_ad = self._thermo.state_from_PT(P, self._T_adiabatic).h
-            h_in_flux = mdot_in * self._eta_cstar * h_ad
-        else:
-            h_in_flux = 0.0
+        # When no propellant flows (e.g. isolated component during Newton iteration),
+        # return a soft spring toward the design-point state rather than a trivially
+        # zero residual.  Trivially zero residuals make P and h unobservable, causing
+        # Newton to wander into unphysical territory.
+        if mdot_in < 1e-12 and abs(mdot_out) < 1e-12:
+            try:
+                h0 = self._thermo.state_from_PT(self._initial_P, self._initial_T).h
+            except Exception:
+                h0 = h
+            k_soft = 1e-4
+            return {"P": k_soft * (self._initial_P - P),
+                    "h": k_soft * (h0 - h)}
 
+        # Combustion: effective enthalpy at adiabatic flame temp * efficiency
+        try:
+            h_ad = self._thermo.state_from_PT(P, self._T_adiabatic).h
+        except Exception:
+            h_ad = h
+        h_in_flux = mdot_in * self._eta_cstar * h_ad
         h_out_flux = mdot_out * h
 
         dP_dt = (fs.gamma * R_eff * fs.T / V) * (mdot_net / fs.rho)

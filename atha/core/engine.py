@@ -1,9 +1,19 @@
 # atha/core/engine.py
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from atha.core.component import BaseComponent
 from atha.core.port import Port, PortConnectionError
+
+
+@dataclass(frozen=True)
+class Connection:
+    """Directed port connection stored in EngineLayout for solver propagation."""
+    src_comp: str
+    src_port: str
+    dst_comp: str
+    dst_port: str
 
 
 class EngineLayout:
@@ -19,12 +29,14 @@ class EngineLayout:
         alg_offsets: Dict[str, int],           # component.name -> start index in Z
         n_states: int,
         n_algebraic: int,
+        connections: Optional[List[Connection]] = None,
     ) -> None:
         self.components = components
         self.state_offsets = state_offsets
         self.alg_offsets = alg_offsets
         self.n_states = n_states
         self.n_algebraic = n_algebraic
+        self.connections: List[Connection] = connections or []
 
     def assemble_state_vector(self) -> np.ndarray:
         """Read current state values from all components into a flat array."""
@@ -118,6 +130,15 @@ class Engine:
                 alg_offsets[comp.name] = alg_idx
                 alg_idx += comp.n_algebraic
 
+        connections: List[Connection] = []
+        for src_port, dst_port in self._connections:
+            connections.append(Connection(
+                src_comp=src_port.owner.name,
+                src_port=src_port.name,
+                dst_comp=dst_port.owner.name,
+                dst_port=dst_port.name,
+            ))
+
         self._compiled = True
         return EngineLayout(
             components=components,
@@ -125,6 +146,7 @@ class Engine:
             alg_offsets=alg_offsets,
             n_states=state_idx,
             n_algebraic=alg_idx,
+            connections=connections,
         )
 
     def __getitem__(self, name: str) -> BaseComponent:

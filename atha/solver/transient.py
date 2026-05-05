@@ -4,6 +4,12 @@ from scipy.integrate import solve_ivp
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Any
 from atha.core.engine import EngineLayout
+from atha.solver.steady_state import (
+    _component_inputs,
+    _seed_from_states,
+    _propagate_forward,
+    _propagate_reverse,
+)
 
 
 @dataclass
@@ -35,6 +41,29 @@ class TransientSolver:
         def rhs(t, X):
             layout.scatter_state_vector(X)
             bcs = boundary_conditions_fn(t)
+
+            # Build context: seed from states, then BCS overrides
+            context: Dict = {}
+            _seed_from_states(layout, context, bcs)
+            context.update(bcs)
+
+            # Pass 1 — propagate outputs
+            for comp in layout.components:
+                off = layout.state_offsets.get(comp.name)
+                states: Dict = {}
+                if off is not None:
+                    for i, name in enumerate(comp.state_names):
+                        states[name] = float(X[off + i])
+                inputs = _component_inputs(comp.name, context)
+                outputs = comp.compute_outputs(t, states, inputs)
+                comp.last_outputs = outputs
+                for conn in layout.connections:
+                    if conn.src_comp == comp.name:
+                        _propagate_forward(conn, outputs, context, bcs)
+                    if conn.dst_comp == comp.name:
+                        _propagate_reverse(conn, outputs, context, bcs)
+
+            # Pass 2 — collect dXdt with full context
             dXdt = np.zeros_like(X)
             for comp in layout.components:
                 off = layout.state_offsets.get(comp.name)
@@ -42,8 +71,9 @@ class TransientSolver:
                 if off is not None:
                     for i, name in enumerate(comp.state_names):
                         states[name] = float(X[off + i])
-                inputs = dict(bcs)
+                inputs = _component_inputs(comp.name, context)
                 outputs = comp.compute_outputs(t, states, inputs)
+                comp.last_outputs = outputs
                 derivs = comp.get_state_derivatives(t, states, inputs, outputs)
                 if off is not None:
                     for i, name in enumerate(comp.state_names):
