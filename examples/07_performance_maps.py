@@ -68,7 +68,7 @@ plt.title("Bellows orifice: CdA(inlet.P)")
 plt.legend()
 plt.tight_layout()
 plt.savefig("outputs/07_bellows_cda.png", dpi=150)
-plt.show()
+plt.close()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Pump efficiency map  (2 axes: "shaft.omega", "inlet.mdot")
@@ -134,7 +134,7 @@ plt.ylabel("Mass flow [kg/s]")
 plt.title("LOX pump efficiency map")
 plt.tight_layout()
 plt.savefig("outputs/07_pump_efficiency_map.png", dpi=150)
-plt.show()
+plt.close()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Cross-component Isp map  (axes: "turbine.T_exit", "chamber.P")
@@ -195,12 +195,12 @@ print(f"  Predicted Cd at dP=2 bar, T=300 K -> {q['Cd']:.4f}")
 print(f"  (training data centroid Cd = {Cd_meas.mean():.4f})")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Callable map — analytical model as a map
+# 5. Callable map - analytical model as a map
 #    c* efficiency as a function of chamber pressure and MR,
 #    based on a simple empirical correlation.
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
-print("5. Callable map — η_cstar(chamber.P, MR)")
+print("5. Callable map - eta_cstar(chamber.P, MR)")
 print("=" * 60)
 
 def eta_cstar_model(**kw):
@@ -233,6 +233,6 @@ print(f"\n  Rasterized callable map saved -> outputs/07_eta_cstar_map.h5")
 
 loaded = PerformanceMap.load("outputs/07_eta_cstar_map.h5")
 check  = loaded.evaluate({"chamber.P": 2e6, "MR": 2.8})
-print(f"  Reloaded map check: η_c* = {check['eta_cstar']:.4f}")
+print(f"  Reloaded map check: eta_c* = {check['eta_cstar']:.4f}")
 
-print("\nDone — all example outputs written to outputs/")
+print("\nDone - all example outputs written to outputs/")
