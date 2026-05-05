@@ -9,6 +9,7 @@ Python library for detailed simulation of liquid rocket engine steady-state and 
 - **JANNAF performance** — simplified efficiency-factor chain (η_c*, η_Cd, η_v, η_div)
 - **Thermodynamics** — ideal gas (testing), CoolProp (LOX/LH2/LCH4), Cantera (combustion)
 - **Stiff ODE integration** — SciPy Radau handles acoustic-to-thermal timescale ratios of 10⁵
+- **Phase 1 DAE foundation** — ordered variable/residual registries, structured layout evaluation, and scaled nonlinear solve diagnostics
 - **Performance maps** — import test data, simulation results, or analytical models as maps on any axis (pressure, speed, temperature, cross-component values) and plug them into any component parameter
 - **Test profiles** — multi-phase sequential simulations with safety limits and automatic abort
 - **Monte Carlo analysis** — Latin Hypercube and Saltelli sampling, parallel runs, Sobol sensitivity indices
@@ -101,7 +102,7 @@ print(f"Thrust:{r.thrust_vacuum/1000:.1f} kN")
 ```
 atha/
 ├── core/          # Engine graph, compile step, port system
-├── solver/        # SteadyStateSolver, TransientSolver
+├── solver/        # SteadyStateSolver, TransientSolver, nonlinear utilities
 ├── thermo/        # IdealGasBackend, CoolPropBackend, CanteraBackend
 ├── components/    # Volume, Rotor, Pipe, Nozzle, Pump, Turbine, ...
 ├── jannaf/        # Simplified performance calculation
@@ -117,6 +118,33 @@ tests/
 
 development/       # Technical reference documents
 ```
+
+## Numerical Core Status
+
+ATHA is being migrated toward an index-1 DAE architecture for realistic engine
+cycle simulation. The first Phase 1 pieces are now available:
+
+- `VariableRegistry` and `ResidualRegistry` record ordered metadata for states,
+  algebraic variables, commands, parameters, outputs, and residuals.
+- `EngineLayout.evaluate(t, X, Z, U)` returns an `EvaluationResult` containing
+  `dXdt`, algebraic residuals, named outputs, residual names, and residual
+  scales.
+- Compiled fluid, shaft, and thermal connections register named residuals such
+  as `connection.source.outlet__sink.inlet.mdot`, giving solver diagnostics a
+  first-class view of graph coupling constraints.
+- `TransientSolver` now routes RHS evaluation through `EngineLayout.evaluate`,
+  preserving existing boundary-condition dictionary workflows while creating a
+  common path for algebraic solves.
+- `atha.solver.nonlinear.solve_nonlinear` provides the initial dense
+  finite-difference Newton utility with residual scaling and named diagnostics.
+- For square component-level algebraic systems, `TransientSolver` solves `Rz=0`
+  inside the RHS and warm-starts from the previous successful `Z`.
+
+Current limitation: this is a compatibility foundation, not the completed DAE
+engine solver. Connection constraints are now registered and evaluated, but they
+are not yet backed by a full port-variable `Z` vector or included in a square
+global algebraic solve. That assembled connection solve is the next Phase 1 step
+before broad component-fidelity upgrades.
 
 ## Running Tests
 

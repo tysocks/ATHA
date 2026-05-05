@@ -8,6 +8,8 @@ from atha.core.port import (
 )
 from atha.core.component import BaseComponent
 from atha.core.engine import Engine, EngineLayout
+from atha.core.evaluation import EvaluationResult
+from atha.core.registry import ResidualRegistry, VariableKind, VariableRegistry
 
 
 # ── Minimal concrete component for testing ────────────────────────────────────
@@ -29,7 +31,7 @@ class _SimpleVolume(BaseComponent):
 
     def _declare_algebraic_vars(self): pass
 
-    def compute_outputs(self, t, states, inputs): return {}
+    def compute_outputs(self, t, states, inputs): return {"pressure": states["P"]}
     def get_state_derivatives(self, t, states, inputs, outputs): return {"P": 0.0, "h": 0.0}
     def get_residuals(self, t, states, inputs, outputs): return {}
     def initialize(self, op): pass
@@ -48,9 +50,9 @@ class _AlgebraicPipe(BaseComponent):
     def _declare_algebraic_vars(self):
         self._register_algebraic("flow_balance")
 
-    def compute_outputs(self, t, states, inputs): return {}
+    def compute_outputs(self, t, states, inputs): return {"mdot": inputs.get("mdot", 0.0)}
     def get_state_derivatives(self, t, states, inputs, outputs): return {}
-    def get_residuals(self, t, states, inputs, outputs): return {"flow_balance": 0.0}
+    def get_residuals(self, t, states, inputs, outputs): return {"flow_balance": inputs.get("flow_residual", 0.0)}
     def initialize(self, op): pass
 
 
@@ -122,6 +124,62 @@ def test_component_algebraic_count():
     pipe = _AlgebraicPipe("pipe")
     assert pipe.n_states == 0
     assert pipe.n_algebraic == 1
+
+
+def test_variable_registry_tracks_metadata_and_order():
+    registry = VariableRegistry()
+    registry.register(
+        name="chamber.P",
+        kind=VariableKind.STATE,
+        units="Pa",
+        scale=1e6,
+        owner="chamber",
+        description="Chamber pressure",
+        bounds=(0.0, None),
+    )
+    registry.register(
+        name="valve.command",
+        kind=VariableKind.COMMAND,
+        units="1",
+        scale=1.0,
+        owner="valve",
+    )
+
+    assert registry.names(VariableKind.STATE) == ["chamber.P"]
+    assert registry.index("valve.command") == 1
+    assert registry["chamber.P"].scale == 1e6
+    assert registry["chamber.P"].bounds == (0.0, None)
+
+
+def test_variable_registry_rejects_duplicates():
+    registry = VariableRegistry()
+    registry.register("chamber.P", VariableKind.STATE, units="Pa", scale=1e6)
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register("chamber.P", VariableKind.STATE, units="Pa", scale=1e6)
+
+
+def test_residual_registry_tracks_scale_and_name_order():
+    registry = ResidualRegistry()
+    registry.register("pipe.flow_balance", units="kg/s", scale=10.0, owner="pipe")
+    registry.register("connection.v1_to_v2.mdot", units="kg/s", scale=1.0)
+
+    assert registry.names() == ["pipe.flow_balance", "connection.v1_to_v2.mdot"]
+    assert registry.index("pipe.flow_balance") == 0
+    assert registry["pipe.flow_balance"].scale == 10.0
+
+
+def test_evaluation_result_normalizes_residuals_by_scale():
+    result = EvaluationResult(
+        dXdt=np.array([0.0]),
+        Rz=np.array([10.0, -2.0]),
+        outputs={"pipe.mdot": 1.0},
+        residual_names=["r1", "r2"],
+        output_names=["pipe.mdot"],
+        residual_scales=np.array([5.0, 0.5]),
+    )
+
+    assert np.allclose(result.normalized_residuals, [2.0, -4.0])
+    assert result.max_normalized_residual() == ("r2", -4.0)
 
 def test_component_port_access():
     v = _SimpleVolume("vol")
@@ -198,6 +256,75 @@ def test_engine_all_state_names():
     layout = engine.compile()
     names = layout.all_state_names()
     assert names == ["vol.P", "vol.h"]
+
+
+def test_engine_compile_populates_variable_and_residual_registries():
+    engine = Engine("test")
+    engine.add_component(_SimpleVolume("vol"))
+    engine.add_component(_AlgebraicPipe("pipe"))
+
+    layout = engine.compile()
+
+    assert layout.variable_registry.names(VariableKind.STATE) == ["vol.P", "vol.h"]
+    assert layout.variable_registry.names(VariableKind.ALGEBRAIC) == ["pipe.flow_balance"]
+    assert layout.residual_registry.names() == ["pipe.flow_balance"]
+    assert layout.residual_registry["pipe.flow_balance"].owner == "pipe"
+
+
+def test_layout_evaluate_returns_derivatives_residuals_and_outputs():
+    engine = Engine("test")
+    engine.add_component(_SimpleVolume("vol", initial_P=2e5, initial_h=5e5))
+    engine.add_component(_AlgebraicPipe("pipe"))
+    layout = engine.compile()
+
+    result = layout.evaluate(
+        t=0.0,
+        X=layout.assemble_state_vector(),
+        Z=np.array([0.0]),
+        U={"mdot": 3.0, "flow_residual": -0.25},
+    )
+
+    assert isinstance(result, EvaluationResult)
+    assert np.allclose(result.dXdt, [0.0, 0.0])
+    assert np.allclose(result.Rz, [-0.25])
+    assert result.residual_names == ["pipe.flow_balance"]
+    assert result.outputs["vol.pressure"] == 2e5
+    assert result.outputs["pipe.mdot"] == 3.0
+
+
+def test_engine_compile_registers_fluid_connection_residuals():
+    engine = Engine("test")
+    pipe = _AlgebraicPipe("pipe")
+    vol = _SimpleVolume("vol")
+    engine.add_component(pipe)
+    engine.add_component(vol)
+    engine.connect(pipe.port("outlet"), vol.port("inlet"))
+
+    layout = engine.compile()
+
+    assert "connection.pipe.outlet__vol.inlet.P" in layout.residual_registry.names()
+    assert "connection.pipe.outlet__vol.inlet.h" in layout.residual_registry.names()
+    assert "connection.pipe.outlet__vol.inlet.mdot" in layout.residual_registry.names()
+
+
+def test_layout_evaluate_reports_fluid_connection_mass_flow_residual():
+    engine = Engine("test")
+    pipe = _AlgebraicPipe("pipe")
+    vol = _SimpleVolume("vol", initial_P=2e5, initial_h=5e5)
+    engine.add_component(pipe)
+    engine.add_component(vol)
+    engine.connect(pipe.port("outlet"), vol.port("inlet"))
+    layout = engine.compile()
+
+    result = layout.evaluate(
+        t=0.0,
+        X=layout.assemble_state_vector(),
+        Z=np.zeros(layout.n_algebraic),
+        U={"pipe.mdot": 3.0, "vol.inlet.mdot": 2.5},
+    )
+
+    idx = result.residual_names.index("connection.pipe.outlet__vol.inlet.mdot")
+    assert result.Rz[idx] == -0.5
 
 def test_engine_connect_valid():
     engine = Engine("test")

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from atha.thermo.ideal_gas import IdealGasBackend
 from atha.components.volume import Volume
+from atha.core.component import BaseComponent
 from atha.core.engine import Engine
 from atha.solver.steady_state import newton_solve, SteadyStateSolver
 from atha.solver.transient import TransientSolver, TransientSolution
@@ -155,3 +156,42 @@ def test_transient_state_names():
     assert result.state_names == layout.all_state_names()
     assert "vol.P" in result.state_names
     assert "vol.h" in result.state_names
+
+
+class _AlgebraicDrivenState(BaseComponent):
+    def __init__(self, name):
+        super().__init__(name)
+
+    def _declare_ports(self):
+        pass
+
+    def _declare_states(self):
+        self._register_state("y", 0.0)
+
+    def _declare_algebraic_vars(self):
+        self._register_algebraic("z")
+
+    def compute_outputs(self, t, states, inputs):
+        return {"z_used": inputs["z"]}
+
+    def get_state_derivatives(self, t, states, inputs, outputs):
+        return {"y": outputs["z_used"]}
+
+    def get_residuals(self, t, states, inputs, outputs):
+        return {"z": inputs["z"] - inputs["target"]}
+
+    def initialize(self, op):
+        pass
+
+
+def test_transient_solves_square_algebraic_system_inside_rhs():
+    engine = Engine("dae")
+    engine.add_component(_AlgebraicDrivenState("block"))
+    layout = engine.compile()
+    X0 = layout.assemble_state_vector()
+
+    solver = TransientSolver(layout, method="Radau", max_step=0.05)
+    result = solver.integrate((0.0, 0.25), X0, lambda t: {"block.target": 2.0})
+
+    y = result.get("block", "y")
+    assert abs(y[-1] - 0.5) < 5e-3

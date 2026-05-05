@@ -10,6 +10,7 @@ from atha.solver.steady_state import (
     _propagate_forward,
     _propagate_reverse,
 )
+from atha.solver.nonlinear import solve_nonlinear
 
 
 @dataclass
@@ -34,18 +35,20 @@ class TransientSolver:
         self.rtol = rtol
         self.atol = atol
         self.max_step = max_step
+        self._last_Z = np.zeros(layout.n_algebraic)
 
     def integrate(self, t_span, X0, boundary_conditions_fn, events=None):
         layout = self.layout
 
         def rhs(t, X):
-            layout.scatter_state_vector(X)
             bcs = boundary_conditions_fn(t)
+            Z = self._solve_algebraics(t, X, bcs)
 
             # Build context: seed from states, then BCS overrides
             context: Dict = {}
             _seed_from_states(layout, context, bcs)
             context.update(bcs)
+            self._inject_algebraics(context, Z)
 
             # Pass 1 — propagate outputs
             for comp in layout.components:
@@ -89,3 +92,33 @@ class TransientSolver:
         t_events = [arr.tolist() for arr in sol.t_events] if sol.t_events is not None else None
         return TransientSolution(t=sol.t, X=sol.y.T, state_names=layout.all_state_names(),
                                  t_events=t_events)
+
+    def _inject_algebraics(self, context, Z):
+        for comp in self.layout.components:
+            off = self.layout.alg_offsets.get(comp.name)
+            if off is None:
+                continue
+            for i, name in enumerate(comp.algebraic_names):
+                context[f"{comp.name}.{name}"] = float(Z[off + i])
+
+    def _solve_algebraics(self, t, X, bcs):
+        if self.layout.n_algebraic == 0:
+            return np.zeros(0)
+
+        probe = self.layout.evaluate(t, X, self._last_Z, bcs)
+        if len(probe.Rz) != self.layout.n_algebraic:
+            # Connection residuals currently expand Rz beyond component Z.
+            # Leave full DAE connection solving to the square assembled system.
+            return self._last_Z
+
+        result = solve_nonlinear(
+            residual_fn=lambda Z: self.layout.evaluate(t, X, Z, bcs).Rz,
+            z0=self._last_Z,
+            residual_scales=probe.residual_scales,
+            variable_scales=np.ones(self.layout.n_algebraic),
+            residual_names=probe.residual_names,
+            tol=1e-10,
+            max_iter=20,
+        )
+        self._last_Z = result.z
+        return result.z
