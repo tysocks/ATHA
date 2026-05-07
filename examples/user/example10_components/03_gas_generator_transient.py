@@ -24,7 +24,7 @@ gg = GasGenerator(
 )
 
 state0 = dict(gg._state_values)
-
+print(state0)
 
 def input_fn(t, _s):
     ramp = min(max((t - 0.2) / 0.8, 0.0), 1.0)

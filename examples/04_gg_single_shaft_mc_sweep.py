@@ -28,7 +28,10 @@ NOTE: Requires planned components — Pump, Turbine, Rotor, GasGenerator,
       CombustionChamber, Nozzle, OrificeCompressible.
 """
 
+import os
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 from atha.core.engine import Engine
 from atha.components.pump import Pump, PumpMap
 from atha.components.turbine import Turbine, TurbineMap
@@ -159,12 +162,17 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------------
     # 1. Nominal steady-state
     # ---------------------------------------------------------------------------
+    OMEGA_DESIGN = 22000 * np.pi / 30.0  # rad/s
+
     layout, eng = build_engine()
     X0  = layout.assemble_state_vector()
     bcs = {
         "lox_pump.inlet.P":  P_lox_tank,  "lox_pump.inlet.h":  h_lox_inlet,
         "fuel_pump.inlet.P": P_fuel_tank, "fuel_pump.inlet.h": h_fuel_inlet,
         "nozzle.P_ambient":  0.0,
+        # Pin shaft to design speed; full torque balance requires a turbine
+        # flow model with choked-nozzle capacity — not yet implemented.
+        "shaft.omega_override": OMEGA_DESIGN,
     }
 
     solver = SteadyStateSolver(layout, tol=1e-8)
@@ -206,9 +214,10 @@ if __name__ == "__main__":
             T_fuel_inlet   = X["T_fuel_inlet"],
         )
         bcs_mc = {
-            "lox_pump.inlet.P": P_lox_tank,  "lox_pump.inlet.h": h_lox,
+            "lox_pump.inlet.P":  P_lox_tank,  "lox_pump.inlet.h":  h_lox,
             "fuel_pump.inlet.P": P_fuel_tank, "fuel_pump.inlet.h": h_fuel,
-            "nozzle.P_ambient": 0.0,
+            "nozzle.P_ambient":  0.0,
+            "shaft.omega_override": OMEGA_DESIGN,
         }
         X_sol = SteadyStateSolver(lay).solve(lay.assemble_state_vector(), bcs_mc)
         lay.scatter_state_vector(X_sol)
@@ -276,18 +285,19 @@ if __name__ == "__main__":
     axes[0].set(xlabel="Pump speed [rpm]", ylabel="Thrust [kN]", title="Thrust vs. pump speed")
     ax1 = axes[1]
     ax1.plot(speeds_rpm, Pc_arr / 1e6, label="Pc (chamber state)")
-    ax1.set(xlabel="Pump speed [rpm]", ylabel="Pc [MPa]", color="C0")
+    ax1.set(xlabel="Pump speed [rpm]", ylabel="Pc [MPa]")
     ax1.tick_params(axis="y", labelcolor="C0")
     ax1b = ax1.twinx()
     ax1b.plot(speeds_rpm, P_lox_out / 1e5, color="C1", label="LOX pump outlet")
-    ax1b.set(ylabel="LOX pump outlet [bar]", color="C1")
+    ax1b.set(ylabel="LOX pump outlet [bar]")
     ax1b.tick_params(axis="y", labelcolor="C1")
     ax1.set_title("Pc vs. pump speed (outlet P responds)")
     axes[2].plot(speeds_rpm, Isp_arr)
     axes[2].set(xlabel="Pump speed [rpm]", ylabel="Isp [s]", title="Isp vs. pump speed")
     plt.tight_layout()
+    os.makedirs("outputs", exist_ok=True)
     plt.savefig("outputs/gg_speed_sweep.png", dpi=150)
-    plt.show()
+    plt.close()
     print("\nSpeed sweep range:")
     print(f"  Thrust: {thrust_arr.min()/1000:.2f} – {thrust_arr.max()/1000:.2f} kN")
     print(f"  Pc:     {Pc_arr.min()/1e6:.3f} – {Pc_arr.max()/1e6:.3f} MPa")

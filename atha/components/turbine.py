@@ -95,11 +95,16 @@ class Turbine(BaseComponent):
     ) -> Dict[str, float]:
         P_in  = inputs.get("inlet.P",  1e6)
         h_in  = inputs.get("inlet.h",  1e6)
-        P_out = inputs.get("outlet.P", 1e5)
-        mdot  = inputs.get("inlet.mdot", 1.0)
+        # Fall back to design pressure ratio if no downstream pressure is provided.
+        # This prevents the turbine from defaulting to 1e5 Pa (ambient), which would
+        # make staged-combustion outlet pressures fall below chamber pressure.
+        P_out_default = P_in / max(self._turbine_map.PR_design, 1.001)
+        P_out = inputs.get("outlet.P", P_out_default)
+        mdot  = inputs.get("inlet.mdot", 0.0)
         omega = inputs.get("shaft.omega", 1000.0)
         gamma = inputs.get("inlet.gamma", self._gamma)
 
+        rho_in = inputs.get("inlet.rho", P_in / max(287.0 * 300.0, 1.0))
         PR = P_in / max(P_out, 1.0)
 
         if self._efficiency_map is not None:
@@ -110,9 +115,13 @@ class Turbine(BaseComponent):
         else:
             eta = self._turbine_map.efficiency(PR)
 
-        # Ideal-gas isentropic enthalpy drop: Δh_s = h_in*(1 - PR^(-(γ-1)/γ))
+        # Isentropic enthalpy drop using P/ρ = R·T (valid regardless of h reference).
+        # The formula h_in*(1-PR^(-exp)) is only correct when h is referenced to T=0;
+        # JANAF enthalpies (Cantera) use a 298 K + formation-energy reference and can
+        # be negative, giving zero turbine work.  Using γ/(γ-1)·P/ρ = c_p·T instead.
         exp = (gamma - 1.0) / gamma
-        delta_h_s = max(h_in * (1.0 - PR ** (-exp)), 0.0)
+        h_thermal = gamma / (gamma - 1.0) * P_in / max(rho_in, 1e-6)
+        delta_h_s = max(h_thermal * (1.0 - PR ** (-exp)), 0.0)
         delta_h   = eta * delta_h_s
         h_out     = h_in - delta_h
         W         = abs(mdot) * delta_h

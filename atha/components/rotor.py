@@ -94,6 +94,23 @@ class Rotor(BaseComponent):
         domega = (tau_drive - tau_load - self._friction_coeff * omega) / self._inertia
         return {"omega": domega}
 
+    def get_steady_state_residuals(
+        self,
+        t: float,
+        states: Dict[str, float],
+        inputs: Dict[str, float],
+        outputs: Dict[str, float],
+    ):
+        omega = states.get("omega", self._initial_omega)
+        if "omega_override" in inputs:
+            omega_t = float(inputs["omega_override"])
+            omega_ref = max(abs(omega_t), 1.0)
+            return {"omega": (omega_t - omega) / omega_ref}
+        tau_drive = sum(inputs.get(f"{n}.tau", 0.0) for n in self._turbine_port_names)
+        tau_load  = sum(inputs.get(f"{n}.tau", 0.0) for n in self._pump_port_names)
+        tau_ref = max(abs(tau_drive) + abs(tau_load), 1.0)
+        return {"omega": (tau_drive - tau_load) / tau_ref}
+
     def get_residuals(self, t, states, inputs, outputs):
         return {}
 

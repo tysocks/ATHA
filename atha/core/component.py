@@ -124,6 +124,22 @@ class BaseComponent(ABC):
     def algebraic_names(self) -> List[str]:
         return list(self._alg_names)
 
+    def get_steady_state_residuals(
+        self,
+        t: float,
+        states: Dict[str, float],
+        inputs: Dict[str, float],
+        outputs: Dict[str, float],
+    ) -> Optional[Dict[str, float]]:
+        """
+        Optional dimensionless O(1) residuals for steady-state Newton.
+
+        Return a dict {state_name: residual} where each value should be ~O(1)
+        at nominal conditions and zero at steady state.  Return None (default)
+        to fall back to scaled get_state_derivatives.
+        """
+        return None
+
     def get_jacobian_sparsity(self) -> Optional[Dict[Tuple[str, str], int]]:
         """Optional: return sparsity pattern for Jacobian optimization."""
         return None

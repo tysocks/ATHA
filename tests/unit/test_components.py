@@ -440,6 +440,30 @@ def test_pump_tau_positive():
     assert out["tau_load"] > 0.0  # pump is a load on the shaft
 
 
+def test_pump_solves_mdot_from_outlet_pressure():
+    p = _make_pump("p1", dP=1e6, mdot=10.0, rpm=1000.0)
+    inputs = _pump_inputs(rpm=1000.0)
+    inputs.pop("inlet.mdot")
+    inputs["outlet.P"] = inputs["inlet.P"] + 0.5e6  # half of shutoff head at design speed
+    out = p.compute_outputs(0.0, {}, inputs)
+    # With the built-in linear head model, design point sits near 50% runout => mdot ~ mdot_design
+    assert abs(out["inlet.mdot"] - 10.0) < 1e-6
+    assert abs(out["mdot"] - out["inlet.mdot"]) < 1e-12
+
+
+def test_pump_solve_mdot_helper_matches_compute_outputs():
+    p = _make_pump("p1", dP=1e6, mdot=10.0, rpm=1000.0)
+    inputs = _pump_inputs(rpm=1000.0)
+    P_in = inputs["inlet.P"]
+    P_out = P_in + 0.6e6
+    omega = inputs["shaft.omega"]
+    mdot_helper = p.solve_mdot(P_in=P_in, P_out=P_out, omega=omega)
+    out = p.compute_outputs(0.0, {}, {
+        "shaft.omega": omega, "inlet.P": P_in, "inlet.h": inputs["inlet.h"], "outlet.P": P_out
+    })
+    assert abs(mdot_helper - out["inlet.mdot"]) < 1e-12
+
+
 # ── Turbine tests ─────────────────────────────────────────────────────────────
 
 from atha.components.turbine import Turbine, TurbineMap

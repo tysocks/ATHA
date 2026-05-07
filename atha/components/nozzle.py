@@ -96,19 +96,24 @@ class Nozzle(BaseComponent):
         context.update(inputs)
         context["ambient_pressure"] = P_a
 
+        # Needed for choked mdot/c* even when Cf comes from a map.
+        if self._thermo is not None:
+            try:
+                fs = self._thermo.state_from_Ph(P_c, h_c)
+                gamma = fs.gamma
+            except Exception:
+                gamma = self._gamma_default
+        else:
+            gamma = inputs.get("inlet.gamma", self._gamma_default)
+        if not isinstance(gamma, (int, float)):
+            gamma = self._gamma_default
+        gamma = float(gamma)
+        gamma = min(max(gamma, 1.01), 2.0)
+
         if self._cf_map is not None:
             Cf_del = self._cf_map.evaluate(context)["Cf"]
+            Cf_del_vac = Cf_del
         else:
-            # Use thermo if available, else use default gamma
-            if self._thermo is not None:
-                try:
-                    fs = self._thermo.state_from_Ph(P_c, h_c)
-                    gamma = fs.gamma
-                except Exception:
-                    gamma = self._gamma_default
-            else:
-                gamma = inputs.get("inlet.gamma", self._gamma_default)
-
             Me = SimplifiedJANNAF._exit_mach(gamma, self._epsilon)
             Pe = P_c * (1.0 + (gamma - 1.0) / 2.0 * Me ** 2) ** (-gamma / (gamma - 1.0))
             Cf_ideal = SimplifiedJANNAF._ideal_cf(gamma, P_c, Pe, P_a, self._epsilon)
@@ -123,7 +128,7 @@ class Nozzle(BaseComponent):
             Cf_del_vac = self._eff.eta_velocity * self._eff.eta_divergence * Cd * Cf_vac
 
         thrust     = Cf_del     * P_c * self._throat_area
-        thrust_vac = Cf_del_vac * P_c * self._throat_area if self._cf_map is None else thrust
+        thrust_vac = Cf_del_vac * P_c * self._throat_area
 
         # Choked-throat mass flow from inlet density (ideal gas: rho = P/(R*T)).
         # Using rho directly avoids needing R separately:

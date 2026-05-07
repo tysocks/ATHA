@@ -1,7 +1,22 @@
 from __future__ import annotations
 import numpy as np
-from scipy.optimize import root
-from typing import Dict, Set
+from typing import Dict, List, Set
+from atha.solver.nonlinear import solve_nonlinear, NonlinearSolveError
+
+
+def newton_solve(F, x0, tol=1e-10, max_iter=200):
+    """Backward-compatible wrapper around solve_nonlinear."""
+    z0 = np.asarray(x0, dtype=float)
+    try:
+        result = solve_nonlinear(
+            residual_fn=F,
+            z0=z0,
+            tol=tol,
+            max_iter=max_iter,
+        )
+        return result.z
+    except (NonlinearSolveError, Exception) as exc:
+        raise RuntimeError(f"Newton solver failed: {exc}") from exc
 
 # Bare output keys that carry meaning across connections.
 # Fluid/thermal scalars propagate by their own name; shaft keys have special aliases.
@@ -10,14 +25,6 @@ _BARE_FLOW  = {"mdot"}
 _BARE_SHAFT = {"omega"}
 _BARE_TAU   = {"tau_drive", "tau_load"}
 _PROPAGATABLE = _BARE_FLUID | _BARE_FLOW | _BARE_SHAFT | _BARE_TAU
-
-
-def newton_solve(F, x0, tol=1e-10, max_iter=200):
-    result = root(F, x0, method="hybr", tol=tol,
-                  options={"maxfev": max_iter * (len(x0) + 1)})
-    if not result.success:
-        raise RuntimeError(f"Newton solver failed: {result.message}")
-    return result.x
 
 
 def _component_inputs(comp_name: str, context: Dict) -> Dict:
@@ -125,9 +132,14 @@ def _evaluate_pass(layout, X: np.ndarray, context: Dict, bcs: Dict,
     Single evaluation pass over all components.
 
     Propagates outputs into *context* (forward and reverse along connections).
-    If *collect_residuals* is True, returns the residual vector; otherwise [].
+    If *collect_residuals* is True, returns (resid_values, resid_names, deriv_scales).
+    deriv_scales are |dX/dt| magnitudes used as fallback scales for components that
+    do not implement get_steady_state_residuals.
     """
-    resid = []
+    resid_vals: List[float] = []
+    resid_names: List[str] = []
+    deriv_scales: List[float] = []
+
     for comp in layout.components:
         off = layout.state_offsets.get(comp.name)
         states: Dict = {}
@@ -147,13 +159,30 @@ def _evaluate_pass(layout, X: np.ndarray, context: Dict, bcs: Dict,
                 _propagate_reverse(conn, outputs, context, bcs)
 
         if collect_residuals:
-            derivs = comp.get_state_derivatives(0.0, states, inputs, outputs)
-            for name in comp.state_names:
-                resid.append(derivs.get(name, 0.0))
-            alg_resid = comp.get_residuals(0.0, states, inputs, outputs)
-            resid.extend(alg_resid.values())
+            ss_resid = comp.get_steady_state_residuals(0.0, states, inputs, outputs)
+            if ss_resid is not None:
+                # Dimensionless residuals provided by the component
+                for sname in comp.state_names:
+                    r = ss_resid.get(sname, 0.0)
+                    resid_vals.append(r)
+                    resid_names.append(f"{comp.name}.{sname}")
+                    deriv_scales.append(1.0)
+            else:
+                # Fallback: use raw dX/dt, scale by magnitude at first call
+                derivs = comp.get_state_derivatives(0.0, states, inputs, outputs)
+                for sname in comp.state_names:
+                    d = derivs.get(sname, 0.0)
+                    resid_vals.append(d)
+                    resid_names.append(f"{comp.name}.{sname}")
+                    deriv_scales.append(max(abs(d), 1.0))
 
-    return resid
+            alg_resid = comp.get_residuals(0.0, states, inputs, outputs)
+            for aname, aval in alg_resid.items():
+                resid_vals.append(aval)
+                resid_names.append(f"{comp.name}.{aname}")
+                deriv_scales.append(max(abs(aval), 1.0))
+
+    return resid_vals, resid_names, deriv_scales
 
 
 class SteadyStateSolver:
@@ -162,29 +191,91 @@ class SteadyStateSolver:
         self.tol = tol
         self.max_iter = max_iter
 
+    def _build_residual_fn(self, layout, bcs):
+        """Return (residual_fn, residual_names, residual_scales)."""
+        scales_ref: List[float] = []
+        names_ref: List[str] = []
+        initialized = [False]
+
+        # Build a map from state index → state name for physical clamping
+        state_names = layout.all_state_names()
+
+        def _clamp_to_physical(X: np.ndarray) -> np.ndarray:
+            """Clamp state vector to physically admissible bounds."""
+            Xc = X.copy()
+            for i, name in enumerate(state_names):
+                if name.endswith(".P"):
+                    Xc[i] = max(Xc[i], 1.0)       # pressure >= 1 Pa
+                elif name.endswith(".h"):
+                    # Cantera JANAF enthalpies are negative for combustion products;
+                    # only reject values more negative than -1 GJ/kg (clearly unphysical).
+                    Xc[i] = max(Xc[i], -1e9)
+                elif name.endswith(".omega"):
+                    Xc[i] = max(Xc[i], 0.01)      # shaft speed >= 0.01 rad/s
+                elif name.endswith(".T_wall"):
+                    Xc[i] = max(Xc[i], 50.0)      # wall temp >= 50 K
+            return Xc
+
+        def residuals(X):
+            Xc = _clamp_to_physical(X)
+            layout.scatter_state_vector(Xc)
+
+            context: Dict = {}
+            _seed_from_states(layout, context, bcs)
+            context.update(bcs)
+
+            # Pass 1 — propagate outputs
+            _evaluate_pass(layout, Xc, context, bcs, collect_residuals=False)
+
+            # Pass 2 — re-evaluate with full context, collect residuals
+            vals, names, dscales = _evaluate_pass(layout, Xc, context, bcs,
+                                                  collect_residuals=True)
+
+            if not initialized[0]:
+                names_ref.extend(names)
+                # For dimensionless residuals (scale=1.0 from ss_resid path),
+                # keep scale=1.0.  For raw dX/dt fallback, use initial magnitude.
+                scales_ref.extend(dscales)
+                initialized[0] = True
+
+            if not vals:
+                return np.zeros(len(X))
+            return np.array(vals, dtype=float)
+
+        return residuals, names_ref, scales_ref
+
     def solve(self, X0, boundary_conditions):
         """Find X* such that all dX/dt = 0 and all algebraic residuals = 0."""
         layout = self.layout
         bcs = dict(boundary_conditions)
 
-        def residuals(X):
-            layout.scatter_state_vector(X)
+        residual_fn, names_ref, scales_ref = self._build_residual_fn(layout, bcs)
 
-            # Build context: seed from states, then BCS overrides
-            context: Dict = {}
-            _seed_from_states(layout, context, bcs)
-            context.update(bcs)
+        # Prime the initializer with a first call
+        R0 = residual_fn(X0.copy())
 
-            # Pass 1 — propagate outputs; don't collect residuals yet
-            _evaluate_pass(layout, X, context, bcs, collect_residuals=False)
+        if len(R0) == 0:
+            # No states — nothing to solve
+            layout.scatter_state_vector(X0)
+            residual_fn(X0)
+            return X0
 
-            # Pass 2 — re-evaluate with fully populated context, collect residuals
-            resid = _evaluate_pass(layout, X, context, bcs, collect_residuals=True)
+        scales = np.array(scales_ref, dtype=float)
+        # Clamp scales to avoid division by zero
+        scales = np.where(scales > 0, scales, 1.0)
 
-            return np.array(resid) if resid else np.zeros(len(X))
+        result = solve_nonlinear(
+            residual_fn=residual_fn,
+            z0=X0.copy(),
+            residual_scales=scales,
+            variable_scales=np.ones(len(X0)),
+            residual_names=names_ref,
+            tol=self.tol,
+            max_iter=self.max_iter,
+        )
 
-        X_sol = newton_solve(residuals, X0, tol=self.tol, max_iter=self.max_iter)
+        X_sol = result.z
         layout.scatter_state_vector(X_sol)
         # Final evaluation to populate last_outputs at the solution
-        residuals(X_sol)
+        residual_fn(X_sol)
         return X_sol

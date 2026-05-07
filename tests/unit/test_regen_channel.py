@@ -102,11 +102,13 @@ def test_q_hot_positive_when_gas_hotter_than_wall():
     assert out["Q_hot"] > 0.0
 
 
-def test_no_q_cool_when_wall_colder_than_coolant():
-    regen = make_regen(initial_T_wall=50.0)   # wall colder than coolant
+def test_q_cool_negative_when_wall_colder_than_coolant():
+    # When T_wall < T_coolant the coolant heats the wall (Q_cool < 0).
+    # The unclamped formula is intentional: it keeps the residual smooth for Newton.
+    regen = make_regen(initial_T_wall=50.0)
     inputs, T_wall = base_inputs(T_wall=50.0)
     out = regen.compute_outputs(0.0, {"T_wall": T_wall}, inputs)
-    assert out["Q_cool"] == 0.0
+    assert out["Q_cool"] < 0.0
 
 
 # ── state derivatives ─────────────────────────────────────────────────────────

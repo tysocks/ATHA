@@ -160,7 +160,13 @@ class RegenChannel(BaseComponent):
         T_wall = states.get("T_wall", self._T_wall_init)
 
         # ── Coolant inlet ────────────────────────────────────────────────────
-        mdot = inputs.get("coolant_inlet.mdot", 1.0)
+        # Priority: inlet (from upstream pump / BCS) > outlet (from downstream
+        # orifice set in pass 1) > fallback 1.0.  In a 2-pass solver pass 2 sees
+        # coolant_outlet.mdot (set by fuel_inj in pass 1) so the regen gets the
+        # correct mass flow even when the upstream pump outputs mdot=0.
+        mdot_in  = inputs.get("coolant_inlet.mdot",  0.0)
+        mdot_out = inputs.get("coolant_outlet.mdot", 0.0)
+        mdot = mdot_in if mdot_in > 0.0 else mdot_out if mdot_out > 0.0 else 1.0
         P_in = inputs.get("coolant_inlet.P", self._Pc_design)
         h_in = inputs.get("coolant_inlet.h",
                           self._fluid.state_from_PT(P_in, 150.0).h)
@@ -172,7 +178,10 @@ class RegenChannel(BaseComponent):
         # ── Hot-side HTC (Bartz, pressure-scaled) ────────────────────────────
         h_hot = self._h_hot_design * (P_gas / self._Pc_design) ** 0.8
         T_aw  = self._r * T_gas
-        Q_hot = h_hot * self._A_hot * max(T_aw - T_wall, 0.0)
+        # Allow Q_hot to be negative (T_wall > T_aw) so the residual stays smooth
+        # and the Newton Jacobian never vanishes. Physically this means the wall
+        # re-radiates back to the gas, which is an acceptable approximation.
+        Q_hot = h_hot * self._A_hot * (T_aw - T_wall)
 
         # ── Coolant bulk properties at inlet state ────────────────────────────
         try:
@@ -192,30 +201,49 @@ class RegenChannel(BaseComponent):
         Re = mdot_safe * self._D_h / (self._A_ch * mu_bulk)
         Nu = 0.023 * Re ** 0.8 * Pr_bulk ** 0.4 if Re > 2300.0 else 3.66
         h_cool = Nu * k_bulk / self._D_h
-        Q_cool = h_cool * self._A_cool * max(T_wall - T_bulk_in, 0.0)
+
+        # NTU-effectiveness model for a constant-wall-temperature single-stream HX.
+        # Using Q = h_cool * A_cool * (T_wall - T_bulk_in) would assume the coolant
+        # temperature stays at T_bulk_in along the entire channel, hugely overestimating
+        # heat transfer when NTU >> 1.  The correct formulation is:
+        #   NTU = UA / (mdot * cp);   ε = 1 - exp(-NTU)
+        #   Q_cool = ε * mdot * cp * (T_wall - T_bulk_in)
+        # Sign convention: Q_cool > 0 when T_wall > T_bulk_in (wall heats coolant).
+        # When T_wall < T_bulk_in, Q_cool < 0 (coolant heats wall) — allowed for Newton
+        # solver smoothness.
+        cp_safe    = max(cp_bulk, 1.0)
+        NTU        = h_cool * self._A_cool / (mdot_safe * cp_safe)
+        eps_HX     = 1.0 - math.exp(-max(NTU, 0.0))
+        G_cool_eff = eps_HX * mdot_safe * cp_safe
+        Q_cool     = G_cool_eff * (T_wall - T_bulk_in)
 
         # ── Coolant outlet ────────────────────────────────────────────────────
-        h_out = h_in + Q_cool / mdot_safe
+        h_out      = h_in + Q_cool / mdot_safe
+        # Exit temperature from the NTU formula (more robust than CoolProp at extreme h)
+        T_bulk_out = T_bulk_in + Q_cool / (mdot_safe * cp_safe)
+        T_bulk_out = max(T_bulk_out, 50.0)
 
         v       = mdot_safe / (rho_bulk * self._A_ch)
         f       = _friction_factor(Re, self._roughness)
         delta_P = f * (self._L / self._D_h) * rho_bulk * v ** 2 / 2.0
         P_out   = P_in - delta_P
 
-        try:
-            T_bulk_out = self._fluid.state_from_Ph(max(P_out, 1e3), h_out).T
-        except Exception:
-            T_bulk_out = T_bulk_in + Q_cool / (mdot_safe * cp_bulk)
-
         return {
-            "coolant_outlet.P": P_out,
-            "coolant_outlet.h": h_out,
-            "Q_cool":           Q_cool,
-            "Q_hot":            Q_hot,
-            "h_hot_coeff":      h_hot,
-            "h_cool_coeff":     h_cool,
-            "T_bulk_out":       T_bulk_out,
-            "delta_P":          delta_P,
+            "coolant_outlet.P":    P_out,
+            "coolant_outlet.h":    h_out,
+            "coolant_outlet.T":    T_bulk_out,   # propagates as inlet.T to downstream orifice
+            "coolant_outlet.mdot": mdot_safe,
+            # Reverse-propagate mdot back to upstream pump via connection
+            "coolant_inlet.mdot":  mdot_safe,
+            "Q_cool":              Q_cool,
+            "Q_hot":               Q_hot,
+            "h_hot_coeff":         h_hot,
+            "h_cool_coeff":        h_cool,
+            "G_cool_eff":          G_cool_eff,
+            "T_bulk_in":           T_bulk_in,
+            "T_bulk_out":          T_bulk_out,
+            "T_aw":                T_aw,
+            "delta_P":             delta_P,
         }
 
     def get_state_derivatives(
@@ -229,6 +257,26 @@ class RegenChannel(BaseComponent):
         Q_cool = outputs.get("Q_cool", 0.0)
         dT_wall = (Q_hot - Q_cool) / (self._m_wall * self._Cp_wall)
         return {"T_wall": dT_wall}
+
+    def get_steady_state_residuals(
+        self,
+        t: float,
+        states: Dict[str, float],
+        inputs: Dict[str, float],
+        outputs: Dict[str, float],
+    ):
+        # Analytical equilibrium using NTU-ε effective conductance:
+        #   G_hot*(T_aw - T_wall*) = G_cool_eff*(T_wall* - T_cool_in)
+        #   → T_wall* = (G_hot*T_aw + G_cool_eff*T_cool_in) / (G_hot + G_cool_eff)
+        T_wall    = states.get("T_wall", self._T_wall_init)
+        G_hot     = outputs.get("h_hot_coeff", 0.0) * self._A_hot
+        G_cool    = outputs.get("G_cool_eff", outputs.get("h_cool_coeff", 0.0) * self._A_cool)
+        T_aw      = outputs.get("T_aw", inputs.get("gas.T", 3500.0) * self._r)
+        T_cool_in = outputs.get("T_bulk_in", self._T_wall_init)
+        G_ref     = max(G_hot + G_cool, 1.0)
+        T_wall_eq = (G_hot * T_aw + G_cool * T_cool_in) / G_ref
+        T_scale   = max(T_wall_eq, T_aw, 1.0)
+        return {"T_wall": (T_wall_eq - T_wall) / T_scale}
 
     def get_residuals(
         self,

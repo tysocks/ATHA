@@ -150,7 +150,7 @@ regen = RegenChannel(
     cool_area=0.18,           # m²   coolant-side area
     wall_mass=2.5,            # kg   CuCrZr alloy jacket
     wall_cp=390.0,            # J/(kg·K)
-    h_hot_design=55000.0,     # W/(m²·K)  Bartz at 10 MPa
+    h_hot_design=8000.0,      # W/(m²·K)  area-averaged Bartz over 0.15 m² contour
     Pc_design=Pc_design,
     recovery_factor=0.90,
     initial_T_wall=300.0,     # K   cold start
@@ -256,8 +256,8 @@ def make_bcs(t):
         "lox_pump.inlet.P":  P_lox_tank,   "lox_pump.inlet.h":  h_lox_inlet,
         "fuel_pump.inlet.P": P_fuel_tank,  "fuel_pump.inlet.h": h_fuel_inlet,
         "nozzle.P_ambient":  0.0,
-        "gas.T": chamber._state_values.get("T", 3500.0),
-        "gas.P": chamber._state_values.get("P", Pc_design),
+        "gas.T": min(chamber._state_values.get("T", 3500.0), 4000.0),
+        "gas.P": min(chamber._state_values.get("P", Pc_design), 14e6),
     }
 
 profile = TestProfile(

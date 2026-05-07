@@ -38,7 +38,10 @@ Compare to:
   08_orsc_lox_methane.py         — same propellants, ORSC topology (+25 s Isp)
 """
 
+import os
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 from atha.core.engine import Engine
 from atha.components.pump import Pump, PumpMap
 from atha.components.turbine import Turbine, TurbineMap
@@ -93,8 +96,8 @@ P_pump_out = Pc_design * 1.55
 # ---------------------------------------------------------------------------
 # Engine factory (used for MC parameter injection)
 # ---------------------------------------------------------------------------
-lox_map_base  = PumpMap.from_design_point(mdot_lox,  P_pump_out - P_lox_tank,  30000, 0.70)
-fuel_map_base = PumpMap.from_design_point(mdot_fuel, P_pump_out - P_fuel_tank, 25000, 0.67)
+lox_map_base  = PumpMap.from_design_point(mdot_lox,  P_pump_out - P_lox_tank,  28000, 0.70)
+fuel_map_base = PumpMap.from_design_point(mdot_fuel, P_pump_out - P_fuel_tank, 28000, 0.67)
 turb_map      = TurbineMap.from_design_point(PR_design=5.5, eta_design=0.72,
                                               mdot_corrected_design=0.025)
 
@@ -130,7 +133,11 @@ def build_engine(
 
     turbine = Turbine("turbine", diameter=0.10, turbine_map=turb_map)
 
-    cc_thermo = CanteraBackend("gri30.yaml")
+    # Approximate CH4/O2 combustion products at MR=3.5 (slightly fuel-rich).
+    # Setting initial composition avoids Cantera's H2 default which gives
+    # unrealistically low density and breaks the nozzle mass-flow calculation.
+    cc_thermo = CanteraBackend("gri30.yaml",
+                               initial_X="H2O:0.60,CO2:0.25,CO:0.08,H2:0.07")
     chamber = CombustionChamber(
         "chamber",
         volume=3e-4,
@@ -157,7 +164,7 @@ def build_engine(
         cool_area=0.16,          # m²   coolant-side area
         wall_mass=2.0,           # kg   CuCrZr alloy jacket
         wall_cp=390.0,           # J/(kg·K)
-        h_hot_design=50000.0,    # W/(m²·K)  Bartz estimate at 10 MPa
+        h_hot_design=8000.0,     # W/(m²·K)  area-averaged Bartz over 0.13 m² contour
         Pc_design=Pc_design,
         recovery_factor=0.90,
         initial_T_wall=300.0,
@@ -198,12 +205,16 @@ def build_engine(
 layout, eng = build_engine()
 X0 = layout.assemble_state_vector()
 
+OMEGA_DESIGN = 28000 * np.pi / 30.0  # rad/s
+
 bcs = {
     "lox_pump.inlet.P":  P_lox_tank,   "lox_pump.inlet.h":  h_lox_inlet,
     "fuel_pump.inlet.P": P_fuel_tank,  "fuel_pump.inlet.h": h_fuel_inlet,
     "nozzle.P_ambient":  0.0,
     "gas.T": 3500.0,    # K  chamber flame temperature for regen
     "gas.P": Pc_design, # Pa
+    # Pin shaft to design speed; full torque balance needs turbine choked-flow model
+    "shaft.omega_override": OMEGA_DESIGN,
 }
 
 solver = SteadyStateSolver(layout, tol=1e-8)
@@ -255,6 +266,7 @@ def evaluate_engine(X: dict) -> float:
         "fuel_pump.inlet.P": P_fuel_tank, "fuel_pump.inlet.h": h_fuel,
         "nozzle.P_ambient":  0.0,
         "gas.T": 3500.0, "gas.P": Pc_design,
+        "shaft.omega_override": OMEGA_DESIGN,
     }
     X_sol = SteadyStateSolver(lay).solve(lay.assemble_state_vector(), bcs_mc)
     lay.scatter_state_vector(X_sol)
@@ -320,19 +332,20 @@ axes[0].plot(speeds_rpm / 1000, thrust_arr / 1000)
 axes[0].set(xlabel="Pump speed [krpm]", ylabel="Thrust [kN]", title="Thrust vs pump speed")
 ax1 = axes[1]
 ax1.plot(speeds_rpm / 1000, Pc_arr / 1e6, label="Pc (chamber state)")
-ax1.set(xlabel="Pump speed [krpm]", ylabel="Pc [MPa]", color="C0")
+ax1.set(xlabel="Pump speed [krpm]", ylabel="Pc [MPa]")
 ax1.tick_params(axis="y", labelcolor="C0")
 ax1b = ax1.twinx()
 ax1b.plot(speeds_rpm / 1000, P_lox_out / 1e5, color="C1", label="LOX pump outlet")
-ax1b.set(ylabel="LOX pump outlet [bar]", color="C1")
+ax1b.set(ylabel="LOX pump outlet [bar]")
 ax1b.tick_params(axis="y", labelcolor="C1")
 ax1.set_title("Pc vs pump speed (outlet P responds)")
 axes[2].plot(speeds_rpm / 1000, Isp_arr)
 axes[2].set(xlabel="Pump speed [krpm]", ylabel="Isp [s]", title="Isp vs pump speed")
 plt.suptitle("GG LOX/CH4 at 10 MPa — pump speed sweep", fontsize=13)
 plt.tight_layout()
+os.makedirs("outputs", exist_ok=True)
 plt.savefig("outputs/gg_ch4_speed_sweep.png", dpi=150)
-plt.show()
+plt.close()
 
 print(f"\nSpeed sweep range  ({speeds_rpm[0]:.0f}–{speeds_rpm[-1]:.0f} rpm):")
 print(f"  Thrust : {thrust_arr.min()/1000:.2f} – {thrust_arr.max()/1000:.2f} kN")

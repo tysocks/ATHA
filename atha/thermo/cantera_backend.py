@@ -28,8 +28,10 @@ class CanteraBackend(ThermoBackend):
                'gri30.yaml' for hydrocarbon combustion.
     """
 
-    def __init__(self, mechanism: str = "h2o2.yaml"):
+    def __init__(self, mechanism: str = "h2o2.yaml", initial_X: Optional[str] = None):
         self._gas = ct.Solution(mechanism)
+        if initial_X is not None:
+            self._gas.X = initial_X
 
     def combustion_equilibrium(
         self,

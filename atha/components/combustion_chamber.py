@@ -89,12 +89,24 @@ class CombustionChamber(BaseComponent):
             fs = self._thermo.state_from_PT(P, self._initial_T)
         # Cache T so examples can read _state_values["T"]
         self._state_values["T"] = fs.T
+        h = states.get("h", self._thermo.state_from_PT(self._initial_P, self._initial_T).h)
+        mdot_lox  = inputs.get("lox_inlet.mdot", inputs.get("ox_inlet.mdot", 0.0))
+        mdot_fuel = inputs.get("fuel_inlet.mdot", 0.0)
+        mdot_in   = mdot_lox + mdot_fuel
+        mdot_out  = inputs.get("outlet.mdot", mdot_in)
         return {
             "fluid_state": fs,
-            "T": fs.T,
-            "P": P,
-            "rho": fs.rho,
-            "gamma": fs.gamma,
+            "T":           fs.T,
+            "P":           P,
+            "h":           h,
+            "rho":         fs.rho,
+            "gamma":       fs.gamma,
+            "outlet.P":    P,
+            "outlet.h":    h,
+            "outlet.T":    fs.T,
+            "outlet.rho":  fs.rho,
+            "outlet.mdot": mdot_out,
+            "mdot":        mdot_out,
         }
 
     def get_state_derivatives(
@@ -131,18 +143,57 @@ class CombustionChamber(BaseComponent):
             return {"P": k_soft * (self._initial_P - P),
                     "h": k_soft * (h0 - h)}
 
-        # Combustion: effective enthalpy at adiabatic flame temp * efficiency
+        # Combustion: drive chamber enthalpy toward the state at eta*T_adiabatic.
+        # Using eta * h(T_ad) would be wrong for JANAF/Cantera enthalpies: those are
+        # measured relative to formation references and are typically negative for
+        # combustion products, so 0.97 * h_negative > h_negative — the ODE would
+        # equilibrate at T > T_ad rather than T = eta*T_ad.  Using h(eta*T_ad) gives
+        # the correct target consistent with the steady-state residual.
         try:
-            h_ad = self._thermo.state_from_PT(P, self._T_adiabatic).h
+            h_target = self._thermo.state_from_PT(P, self._eta_cstar * self._T_adiabatic).h
         except Exception:
-            h_ad = h
-        h_in_flux = mdot_in * self._eta_cstar * h_ad
+            h_target = h
+        h_in_flux = mdot_in * h_target
         h_out_flux = mdot_out * h
 
         dP_dt = (fs.gamma * R_eff * fs.T / V) * (mdot_net / fs.rho)
         dh_dt = (1.0 / m) * (h_in_flux - h_out_flux - V * dP_dt)
 
         return {"P": dP_dt, "h": dh_dt}
+
+    def get_steady_state_residuals(
+        self,
+        t: float,
+        states: Dict[str, float],
+        inputs: Dict[str, float],
+        outputs: Dict[str, float],
+    ):
+        mdot_lox  = inputs.get("lox_inlet.mdot", inputs.get("ox_inlet.mdot", 0.0))
+        mdot_fuel = inputs.get("fuel_inlet.mdot", 0.0)
+        mdot_out  = inputs.get("outlet.mdot", 0.0)
+        mdot_in   = mdot_lox + mdot_fuel
+
+        P = states.get("P", self._initial_P)
+        h = states.get("h", 0.0)
+
+        if mdot_in < 1e-12 and abs(mdot_out) < 1e-12:
+            T_current = outputs.get("T", self._initial_T)
+            return {
+                "P": (self._initial_P - P) / max(abs(self._initial_P), 1.0),
+                "h": (self._initial_T - T_current) / max(self._initial_T, 1.0),
+            }
+
+        mdot_ref = max(mdot_in, abs(mdot_out), 1e-9)
+        r_mass = (mdot_in - mdot_out) / mdot_ref
+
+        # Temperature residual: chamber T should approach eta_cstar * T_adiabatic.
+        # Using T (from compute_outputs) rather than h avoids enthalpy-unit scaling
+        # issues and produces a well-conditioned Newton step ~= dT/T_adiabatic.
+        T_current = outputs.get("T", self._initial_T)
+        T_target = self._eta_cstar * self._T_adiabatic
+        r_temp = (T_target - T_current) / max(T_target, 1.0)
+
+        return {"P": r_mass, "h": r_temp}
 
     def get_residuals(self, t, states, inputs, outputs):
         return {}

@@ -32,7 +32,7 @@ Regen channel geometry (representative chamber + nozzle jacket):
   Cool-area             : 0.18 m²  (coolant-side surface, slightly larger)
   Wall mass             : 2.5 kg   (CuCrZr alloy jacket)
   Wall Cp               : 390 J/(kg·K)  (CuCrZr at operating temperature)
-  h_hot (Bartz design)  : 55 000 W/(m²·K)
+  h_hot (area-avg)      :  8 000 W/(m²·K)
 """
 
 import numpy as np
@@ -127,7 +127,7 @@ regen = RegenChannel(
     cool_area=0.18,            # m²   coolant-side area
     wall_mass=2.5,             # kg   CuCrZr alloy jacket
     wall_cp=390.0,             # J/(kg·K)
-    h_hot_design=55000.0,      # W/(m²·K)  Bartz at 10 MPa design point
+    h_hot_design=8000.0,       # W/(m²·K)  area-averaged Bartz over 0.15 m² contour
     Pc_design=Pc_design,
     recovery_factor=0.90,
     initial_T_wall=300.0,      # K    engine starts cold
@@ -217,9 +217,9 @@ def make_bcs(t):
         "lox_pump.inlet.P":  P_lox_tank,   "lox_pump.inlet.h":  h_lox_inlet,
         "fuel_pump.inlet.P": P_fuel_tank,  "fuel_pump.inlet.h": h_fuel_inlet,
         "nozzle.P_ambient":  0.0,
-        # Use current chamber state for hot-gas inputs to regen
-        "gas.T": chamber._state_values.get("T", 3500.0),
-        "gas.P": chamber._state_values.get("P", Pc_design),
+        # Use current chamber state for hot-gas inputs to regen (clamped to physical range)
+        "gas.T": min(chamber._state_values.get("T", 3500.0), 4000.0),
+        "gas.P": min(chamber._state_values.get("P", Pc_design), 14e6),
     }
 
 profile = TestProfile(

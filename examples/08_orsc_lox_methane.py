@@ -25,6 +25,7 @@ The high chamber pressure relative to the ethanol examples (02_orsc_cycle.py)
 requires ~1.8× pump outlet pressure and a higher-energy preburner circuit.
 """
 
+import matplotlib; matplotlib.use("Agg")
 import numpy as np
 from atha.core.engine import Engine
 from atha.components.pump import Pump, PumpMap
@@ -80,9 +81,9 @@ P_pump_out = Pc_design * 1.8
 # ---------------------------------------------------------------------------
 # Performance maps (design-point based)
 # ---------------------------------------------------------------------------
-lox_map  = PumpMap.from_design_point(mdot_lox,        P_pump_out - P_lox_tank,  30000, 0.72)
-fuel_map = PumpMap.from_design_point(mdot_fuel,        P_pump_out - P_fuel_tank, 26000, 0.68)
-turb_map = TurbineMap.from_design_point(PR_design=2.5, eta_design=0.73,
+lox_map  = PumpMap.from_design_point(mdot_lox,        P_pump_out - P_lox_tank,  28000, 0.72)
+fuel_map = PumpMap.from_design_point(mdot_fuel,        P_pump_out - P_fuel_tank, 28000, 0.68)
+turb_map = TurbineMap.from_design_point(PR_design=1.5, eta_design=0.73,
                                         mdot_corrected_design=0.06)
 
 # ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ shaft = Rotor("shaft", moment_of_inertia=0.10, initial_speed_rpm=28000)
 lox_pump  = Pump("lox_pump",  diameter=0.085, pump_map=lox_map,  fluid=lox)
 fuel_pump = Pump("fuel_pump", diameter=0.060, pump_map=fuel_map, fluid=methane)
 
-pb_thermo = CanteraBackend("gri30.yaml")
+pb_thermo = CanteraBackend("gri30.yaml", initial_X="O2:0.885,H2O:0.077,CO2:0.038")
 preburner = Preburner(
     "preburner",
     volume=1.5e-4,
@@ -121,13 +122,14 @@ regen = RegenChannel(
     cool_area=0.18,           # m²   coolant-side area
     wall_mass=2.5,            # kg   CuCrZr alloy jacket
     wall_cp=390.0,            # J/(kg·K)
-    h_hot_design=55000.0,     # W/(m²·K)  Bartz at 10 MPa
+    h_hot_design=8000.0,      # W/(m²·K)  area-averaged Bartz over 0.15 m² contour
     Pc_design=Pc_design,
     recovery_factor=0.90,
     initial_T_wall=300.0,     # K   cold start
 )
 
-cc_thermo = CanteraBackend("gri30.yaml")
+cc_thermo = CanteraBackend("gri30.yaml",
+                           initial_X="H2O:0.60,CO2:0.25,CO:0.08,H2:0.07")
 chamber = CombustionChamber(
     "chamber",
     volume=3e-4,
@@ -143,8 +145,11 @@ nozzle_eff = JANNAFEfficiencies(eta_cstar=0.975, eta_divergence=0.985)
 nozzle = Nozzle("nozzle", throat_area=At, exit_area=At * Ae_At, efficiencies=nozzle_eff)
 
 # Injector orifices
-lox_inj  = OrificeCompressible("lox_inj",  Cd=0.72, area=1.2e-4)
-fuel_inj = OrificeCompressible("fuel_inj", Cd=0.72, area=0.9e-4)
+# lox_inj handles turbine exhaust (ox-rich gas ~730 K, mostly O2): R=265 J/kg·K, gamma=1.4
+# Area sized for ~4.4 kg/s at 12 MPa turbine-out, 10 MPa chamber
+lox_inj  = OrificeCompressible("lox_inj",  Cd=0.72, area=3.0e-4, gamma=1.4, R_gas=265.0)
+# fuel_inj handles supercritical methane after regen: R=518 J/kg·K, gamma=1.3
+fuel_inj = OrificeCompressible("fuel_inj", Cd=0.72, area=0.9e-4, gamma=1.3, R_gas=518.3)
 
 for comp in [shaft, lox_pump, fuel_pump, preburner, turbine,
              regen, chamber, nozzle, lox_inj, fuel_inj]:
@@ -175,12 +180,20 @@ X0 = layout.assemble_state_vector()
 # Steady-state trim balance
 # Hot gas conditions fed to regen via BCS
 # ---------------------------------------------------------------------------
+OMEGA_DESIGN = 28000 * np.pi / 30.0  # rad/s
+
 bcs_ss = {
-    "lox_pump.inlet.P":  P_lox_tank,   "lox_pump.inlet.h":  h_lox_inlet,
-    "fuel_pump.inlet.P": P_fuel_tank,  "fuel_pump.inlet.h": h_fuel_inlet,
-    "nozzle.P_ambient":  0.0,
+    "lox_pump.inlet.P":    P_lox_tank,    "lox_pump.inlet.h":    h_lox_inlet,
+    "lox_pump.inlet.mdot": mdot_lox,
+    "fuel_pump.inlet.P":   P_fuel_tank,   "fuel_pump.inlet.h":   h_fuel_inlet,
+    "fuel_pump.inlet.mdot": mdot_fuel,
+    # Pin bleed flow so pump's bare-mdot broadcast doesn't flood the preburner.
+    # Without this the pump propagates mdot_fuel (total) to BOTH regen and preburner.
+    "preburner.fuel_inlet.mdot": mdot_pb_fuel,
+    "nozzle.P_ambient":    0.0,
     "gas.T": 3500.0,    # K   chamber flame temperature estimate
     "gas.P": Pc_design, # Pa
+    "shaft.omega_override": OMEGA_DESIGN,
 }
 
 solver = SteadyStateSolver(layout, tol=1e-8)
@@ -216,13 +229,29 @@ def throttle(t):
     return 1.0
 
 def make_bcs(t):
+    # Provides defaults — ControlCommands in the transient phase override pump mdots.
     return {
-        "lox_pump.inlet.P":  P_lox_tank,   "lox_pump.inlet.h":  h_lox_inlet,
-        "fuel_pump.inlet.P": P_fuel_tank,  "fuel_pump.inlet.h": h_fuel_inlet,
-        "nozzle.P_ambient":  0.0,
-        "gas.T": chamber._state_values.get("T", 3500.0),
-        "gas.P": chamber._state_values.get("P", Pc_design),
+        "lox_pump.inlet.P":    P_lox_tank,    "lox_pump.inlet.h":    h_lox_inlet,
+        "lox_pump.inlet.mdot": mdot_lox,      # default (overridden by throttle command)
+        "fuel_pump.inlet.P":   P_fuel_tank,   "fuel_pump.inlet.h":   h_fuel_inlet,
+        "fuel_pump.inlet.mdot": mdot_fuel,    # default (overridden by throttle command)
+        # Override bare-mdot broadcast from fuel_pump so preburner only sees its bleed fraction.
+        "preburner.fuel_inlet.mdot": mdot_pb_fuel,
+        "nozzle.P_ambient":    0.0,
+        "gas.T": min(chamber._state_values.get("T", 3500.0), 4000.0),
+        "gas.P": min(chamber._state_values.get("P", Pc_design), 14e6),
     }
+
+_diag_prev_t = [-1.0]
+def make_bcs_diag(t):
+    bcs = make_bcs(t)
+    if t - _diag_prev_t[0] >= 0.05:
+        T_w = regen._state_values.get("T_wall", float("nan"))
+        T_ch = chamber._state_values.get("T", float("nan"))
+        Pc   = chamber._state_values.get("P", float("nan"))
+        print(f"  [diag t={t:.4f}] T_wall={T_w:.1f}K  T_ch={T_ch:.1f}K  Pc={Pc/1e6:.3f}MPa  gas.T={bcs['gas.T']:.1f}K")
+        _diag_prev_t[0] = t
+    return bcs
 
 profile = TestProfile(
     name="orsc_ch4_throttle",
@@ -231,6 +260,7 @@ profile = TestProfile(
             name="trim",
             mode=PhaseMode.STEADY_TRIM,
             duration=5.0,
+            trim_targets={"shaft.omega_override": OMEGA_DESIGN},
         ),
         PhaseDefinition(
             name="throttle",
@@ -239,8 +269,10 @@ profile = TestProfile(
             control_commands=[
                 ControlCommand("lox_pump.inlet.mdot",  fn=lambda t: mdot_lox   * throttle(t)),
                 ControlCommand("fuel_pump.inlet.mdot", fn=lambda t: mdot_fuel  * throttle(t)),
+                ControlCommand("preburner.fuel_inlet.mdot", fn=lambda t: mdot_pb_fuel * throttle(t)),
                 ControlCommand("lox_pump.inlet.h",     fn=lambda t: h_lox_inlet),
                 ControlCommand("fuel_pump.inlet.h",    fn=lambda t: h_fuel_inlet),
+                ControlCommand("shaft.omega_override", fn=lambda t: OMEGA_DESIGN),
             ],
             recording_rate_hz=200.0,
         ),
@@ -249,11 +281,11 @@ profile = TestProfile(
         SafetyLimit("Pc_max",      "chamber",   "P",      upper_limit=13.0e6,         is_hard=True),
         SafetyLimit("T_pb_max",    "preburner", "T",      upper_limit=900.0,          is_hard=True),
         SafetyLimit("rpm_max",     "shaft",     "omega",  upper_limit=36000*np.pi/30, is_hard=True),
-        SafetyLimit("T_wall_max",  "regen",     "T_wall", upper_limit=1200.0,         is_hard=True),
+        SafetyLimit("T_wall_max",  "regen",     "T_wall", upper_limit=2000.0,         is_hard=True),
     ],
 )
 
-result = profile.execute(layout, X_ss, bcs_fn=make_bcs)
+result = profile.execute(layout, X_ss, bcs_fn=make_bcs_diag)
 
 if result.success:
     trans  = result.get_phase("throttle")

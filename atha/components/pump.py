@@ -46,6 +46,25 @@ class PumpMap:
         ratio = omega / max(self._omega_design, 1.0)
         return self._dP_design * ratio ** 2
 
+    def mdot_from_delta_P(self, omega: float, delta_P: float) -> float:
+        """
+        Infer mass flow from shaft speed and requested pressure rise.
+
+        Uses a simple linear head curve at fixed speed:
+            delta_P = dP_shutoff * (1 - mdot / mdot_runout)
+        with affinity scaling:
+            dP_shutoff ~ omega^2
+            mdot_runout ~ omega
+        and design point anchored at ~50% of runout flow.
+        """
+        omega_ratio = omega / max(self._omega_design, 1e-9)
+        dP_shutoff = self._dP_design * omega_ratio ** 2
+        mdot_runout = 2.0 * self._mdot_design * omega_ratio
+        if dP_shutoff <= 1e-12 or mdot_runout <= 0.0:
+            return 0.0
+        frac = max(0.0, min(1.0, 1.0 - max(delta_P, 0.0) / dP_shutoff))
+        return mdot_runout * frac
+
     def efficiency(self, mdot: float = 0.0, omega: float = 0.0) -> float:
         return self._eta_design
 
@@ -60,6 +79,10 @@ class PumpMap:
     @property
     def dP_design(self) -> float:
         return self._dP_design
+
+    @property
+    def mdot_design(self) -> float:
+        return self._mdot_design
 
 
 class Pump(BaseComponent):
@@ -117,6 +140,11 @@ class Pump(BaseComponent):
             self._register_port(name, FluidPort(name, PortDirection.OUTLET, self))
         return self._ports[name]
 
+    def solve_mdot(self, P_in: float, P_out: float, omega: float) -> float:
+        """Convenience inverse-map call for one-off operating-point estimates."""
+        delta_P = max(P_out - P_in, 0.0)
+        return self._pump_map.mdot_from_delta_P(omega, delta_P)
+
     def compute_outputs(
         self,
         t: float,
@@ -126,7 +154,7 @@ class Pump(BaseComponent):
         omega = inputs.get("shaft.omega", self._pump_map.omega_design)
         P_in  = inputs.get("inlet.P", 4e5)
         h_in  = inputs.get("inlet.h", 0.0)
-        mdot  = inputs.get("inlet.mdot", 0.0)
+        mdot_input = inputs.get("inlet.mdot", None)
 
         # Fluid state at inlet (density, temperature for downstream propagation)
         try:
@@ -137,8 +165,29 @@ class Pump(BaseComponent):
             rho = 1000.0
             T_in = 300.0
 
-        delta_P = self._pump_map.delta_P(omega)
-        P_out = P_in + delta_P
+        if mdot_input is not None:
+            mdot = mdot_input
+            delta_P = self._pump_map.delta_P(omega)
+            P_out = P_in + delta_P
+        elif "outlet.P" in inputs:
+            P_out = float(inputs["outlet.P"])
+            delta_P = max(P_out - P_in, 0.0)
+            mdot = self.solve_mdot(P_in, P_out, omega)
+        elif "outlet.mdot" in inputs:
+            # Downstream orifice determined the main flow; pump provides head
+            mdot = float(inputs["outlet.mdot"])
+            delta_P = self._pump_map.delta_P(omega)
+            P_out = P_in + delta_P
+        else:
+            mdot = 0.0
+            delta_P = self._pump_map.delta_P(omega)
+            P_out = P_in + delta_P
+
+        # Add bleed-path flows (from downstream orifices via reverse propagation)
+        bleed_mdot = 0.0
+        for k, v in inputs.items():
+            if k.endswith(".mdot") and k != "inlet.mdot" and k != "outlet.mdot":
+                bleed_mdot += float(v)
 
         if self._efficiency_map is not None:
             ctx = dict(states)
@@ -150,7 +199,8 @@ class Pump(BaseComponent):
 
         eta = min(max(eta * self.map_efficiency_scale, 1e-6), 1.0)
 
-        W   = abs(mdot) * delta_P / (rho * max(eta, 1e-6))
+        total_mdot = abs(mdot) + abs(bleed_mdot)
+        W   = total_mdot * delta_P / (rho * max(eta, 1e-6))
         tau = W / max(abs(omega), 1.0)
 
         return {
@@ -164,6 +214,8 @@ class Pump(BaseComponent):
             "T":    T_in,
             "rho":  rho,
             "delta_P":    delta_P,
+            "inlet.mdot": mdot,
+            "mdot":       mdot,
             "power":      W,
             "tau_load":   tau,
             "efficiency": eta,

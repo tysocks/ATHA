@@ -27,7 +27,7 @@ def execute_phase(
     state_names = layout.all_state_names()
 
     if phase.mode == PhaseMode.STEADY_TRIM:
-        return _execute_steady_trim(layout, X0, phase, abort_mgr, state_names)
+        return _execute_steady_trim(layout, X0, phase, abort_mgr, state_names, extra_bcs_fn)
     elif phase.mode == PhaseMode.TRANSIENT:
         return _execute_transient(layout, X0, phase, abort_mgr, state_names, extra_bcs_fn)
     elif phase.mode == PhaseMode.DWELL:
@@ -36,13 +36,23 @@ def execute_phase(
         raise ValueError(f"Unknown PhaseMode: {phase.mode}")
 
 
-def _execute_steady_trim(layout, X0, phase, abort_mgr, state_names) -> PhaseResult:
+def _execute_steady_trim(
+    layout, X0, phase, abort_mgr, state_names,
+    extra_bcs_fn: Optional[Callable[[float], Dict[str, float]]] = None,
+) -> PhaseResult:
+    # Merge extra_bcs_fn(0) with trim_targets so the trim solve has the same
+    # boundary conditions as the subsequent transient (pump inlets, gas state, etc.).
+    # trim_targets takes priority so the requested trim point is honoured.
+    bcs: Dict[str, float] = {}
+    if extra_bcs_fn is not None:
+        bcs.update(extra_bcs_fn(0.0))
+    bcs.update(phase.trim_targets)
     solver = SteadyStateSolver(
         layout,
         tol=phase.solver_options.get("tol", 1e-8),
         max_iter=phase.solver_options.get("max_iter", 200),
     )
-    X_sol = solver.solve(X0, phase.trim_targets)
+    X_sol = solver.solve(X0, bcs)
     abort_mgr.check(layout, X_sol, t=phase.duration)
 
     t = np.array([0.0, phase.duration])
@@ -65,11 +75,14 @@ def _execute_transient(
     extra_bcs_fn: Optional[Callable[[float], Dict[str, float]]] = None,
 ) -> PhaseResult:
     def bcs(t_phase):
+        # extra_bcs_fn provides defaults (e.g. pump inlet conditions, gas state).
+        # ControlCommands take priority — they must be applied last so throttle
+        # commands override any same-key defaults from the BCS function.
         result: Dict[str, float] = {}
-        for cmd in phase.control_commands:
-            result[cmd.bcs_key] = cmd.fn(t_phase)
         if extra_bcs_fn is not None:
             result.update(extra_bcs_fn(t_phase))
+        for cmd in phase.control_commands:
+            result[cmd.bcs_key] = cmd.fn(t_phase)
         return result
 
     # Build scipy event callbacks for limit checking
@@ -94,11 +107,23 @@ def _execute_transient(
 
     # Check if a hard limit event fired (terminal=True means integration stopped early)
     if scipy_events and sol.t_events is not None:
+        all_limits = abort_mgr.limits
+        limit_events = []
+        for lim in all_limits:
+            if lim.upper_limit is not None:
+                limit_events.append((lim, "upper"))
+            if lim.lower_limit is not None:
+                limit_events.append((lim, "lower"))
         for i, t_ev_list in enumerate(sol.t_events):
             if len(t_ev_list) > 0 and scipy_events[i].terminal:
                 abort_t = float(t_ev_list[0])
+                lim_desc = ""
+                if i < len(limit_events):
+                    lim, side = limit_events[i]
+                    bound = lim.upper_limit if side == "upper" else lim.lower_limit
+                    lim_desc = f" [{lim.name}: {lim.component_name}.{lim.state_name} {'>' if side=='upper' else '<'} {bound:.4g}]"
                 raise EngineAbort(
-                    reason=f"Hard limit triggered at t={abort_t:.4f}s",
+                    reason=f"Hard limit triggered at t={abort_t:.4f}s{lim_desc}",
                     t=abort_t,
                 )
 
