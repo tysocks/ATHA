@@ -1,0 +1,24 @@
+name: two_valve_transient_chain
+engine: engine.yaml
+boundary_conditions: boundaries.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: Radau
+    rtol: 1.0e-7
+    atol: 1.0e-6
+    max_step: 0.005
+analysis:
+  type: two_valve_transient_chain
+  time:
+    start_s: 0.0
+    end_s: 5.0
+  model:
+    initial_Pc: 101325.0
+    initial_mdot_a: 0.0
+    initial_mdot_b: 0.0
+  output:
+    csv: two_valve_transient_chain.csv
+    plot: two_valve_transient_chain.png

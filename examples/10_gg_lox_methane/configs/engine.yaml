@@ -1,0 +1,126 @@
+name: gg_lox_ch4
+units: SI
+components:
+  shaft:
+    type: Rotor
+    parameters:
+      moment_of_inertia: 0.10
+      initial_speed_rpm: 28000
+  lox_pump:
+    type: Pump
+    parameters:
+      diameter: 0.085
+      pump_map:
+        mdot_design: 4.56
+        dP_design: 15.1e6
+        speed_design: 28000
+        efficiency_design: 0.70
+    maps:
+      efficiency_map:
+        ref: lox_pump_efficiency
+        output: efficiency
+  fuel_pump:
+    type: Pump
+    parameters:
+      diameter: 0.055
+      pump_map:
+        mdot_design: 1.30
+        dP_design: 15.1e6
+        speed_design: 28000
+        efficiency_design: 0.67
+    maps:
+      efficiency_map:
+        ref: fuel_pump_efficiency
+        output: efficiency
+  gg:
+    type: GasGenerator
+    parameters:
+      volume: 1.0e-4
+      design_MR: 0.35
+      efficiency: 0.93
+      initial_P: 15.5e6
+      initial_T: 1050.0
+  turbine:
+    type: Turbine
+    parameters:
+      diameter: 0.10
+      turbine_map:
+        PR_design: 5.5
+        eta_design: 0.72
+        mdot_corrected_design: 0.025
+  regen:
+    type: RegenChannel
+    parameters:
+      channel_area: 5.0e-5
+      hydraulic_diam: 3.0e-3
+      channel_length: 0.7
+      hot_area: 0.13
+      cool_area: 0.16
+      wall_mass: 2.0
+      wall_cp: 390.0
+      h_hot_design: 8000.0
+      Pc_design: 10.0e6
+      recovery_factor: 0.90
+      initial_T_wall: 300.0
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 3.0e-4
+      efficiency: 0.97
+      initial_P: 10.0e6
+      initial_T: 3500.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 1.03e-3
+      exit_area: 5.15e-2
+      efficiencies:
+        eta_cstar: 0.975
+        eta_divergence: 0.985
+  lox_inj:
+    type: OrificeCompressible
+    parameters:
+      Cd: 0.72
+      area: 1.2e-4
+  fuel_inj:
+    type: OrificeCompressible
+    parameters:
+      Cd: 0.72
+      area: 9.0e-5
+connections:
+  - from: lox_pump.bleed
+    to: gg.lox_inlet
+    domain: fluid
+  - from: fuel_pump.bleed
+    to: gg.fuel_inlet
+    domain: fluid
+  - from: gg.outlet
+    to: turbine.inlet
+    domain: fluid
+  - from: lox_pump.outlet
+    to: lox_inj.inlet
+    domain: fluid
+  - from: fuel_pump.outlet
+    to: regen.coolant_inlet
+    domain: fluid
+  - from: regen.coolant_outlet
+    to: fuel_inj.inlet
+    domain: fluid
+  - from: lox_inj.outlet
+    to: chamber.lox_inlet
+    domain: fluid
+  - from: fuel_inj.outlet
+    to: chamber.fuel_inlet
+    domain: fluid
+  - from: chamber.outlet
+    to: nozzle.inlet
+    domain: fluid
+  - from: turbine.shaft
+    to: shaft.turbine_in
+    domain: shaft
+  - from: lox_pump.shaft
+    to: shaft.pump_lox
+    domain: shaft
+  - from: fuel_pump.shaft
+    to: shaft.pump_fuel
+    domain: shaft

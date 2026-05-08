@@ -1,0 +1,22 @@
+name: tca_propellant_valve_transients
+transients:
+  methane_valve_linear:
+    type: linear
+    input: methane_valve.command
+    output: methane_valve.position
+    initial: 0.2
+    parameters:
+      duration: 2.0
+      from: 0.2
+      to: 1.0
+      lower_limit: 0.0
+      upper_limit: 1.0
+  lox_valve_first_order:
+    type: first_order
+    input: lox_valve.command
+    output: lox_valve.position
+    initial: 0.2
+    parameters:
+      time_constant: 0.55
+      lower_limit: 0.0
+      upper_limit: 1.0

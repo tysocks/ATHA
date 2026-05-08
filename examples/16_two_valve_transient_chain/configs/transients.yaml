@@ -1,0 +1,22 @@
+name: two_valve_transients
+transients:
+  valve_a_linear:
+    type: linear
+    input: valve_a.command
+    output: valve_a.position
+    initial: 0.2
+    parameters:
+      duration: 2.0
+      from: 0.2
+      to: 1.0
+      lower_limit: 0.0
+      upper_limit: 1.0
+  valve_b_first_order:
+    type: first_order
+    input: valve_b.command
+    output: valve_b.position
+    initial: 0.2
+    parameters:
+      time_constant: 0.55
+      lower_limit: 0.0
+      upper_limit: 1.0

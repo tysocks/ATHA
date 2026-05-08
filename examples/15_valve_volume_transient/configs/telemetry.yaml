@@ -1,0 +1,22 @@
+name: valve_volume_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: TIME
+    source: time
+    units: s
+  - alias: VALVE_COMMAND
+    source: valve.command
+  - alias: VALVE_POSITION
+    source: valve.position
+  - alias: P_DOWNSTREAM
+    source: downstream.P
+    units: bar
+  - alias: MDOT_IN
+    source: valve.mdot
+    units: kg/s
+  - alias: MDOT_OUT
+    source: outlet.mdot
+    units: kg/s
+exports:
+  csv: true
+  plot: true

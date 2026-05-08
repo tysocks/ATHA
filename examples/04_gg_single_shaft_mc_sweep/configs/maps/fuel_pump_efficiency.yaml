@@ -1,0 +1,8 @@
+name: fuel_pump_efficiency
+kind: constant
+source:
+  type: constant
+  values:
+    efficiency: 0.65
+outputs:
+  - name: efficiency

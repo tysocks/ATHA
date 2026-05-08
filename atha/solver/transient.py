@@ -27,6 +27,18 @@ class TransientSolution:
                 return self.X[:, i]
         raise KeyError(f"State '{key}' not found. Available: {self.state_names}")
 
+    def without_initial_sample(self) -> "TransientSolution":
+        """Return a copy without the solver's unresolved initial condition row."""
+
+        if len(self.t) <= 1:
+            return self
+        return TransientSolution(
+            t=self.t[1:].copy(),
+            X=self.X[1:].copy(),
+            state_names=list(self.state_names),
+            t_events=self.t_events,
+        )
+
 
 class TransientSolver:
     def __init__(self, layout, method="Radau", rtol=1e-4, atol=1e-6, max_step=1e-3):

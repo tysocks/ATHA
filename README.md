@@ -1,674 +1,534 @@
-# ATHA — Advanced Transient and High-fidelity Analysis
+# ATHA - Advanced Transient and High-fidelity Analysis
 
-Python library for detailed simulation of liquid rocket engine steady-state and transient performance, implementing the modeling capabilities of the ROCKETS system (NASA/P&W 1991) and JANNAF performance methodology (CPIA 246, 1975).
+ATHA is a Python toolkit for liquid rocket engine cycle modelling, transient
+analysis, test-profile simulation, and uncertainty analysis. The architecture is
+based on the NASA ROCETS approach: reusable component models are connected into
+an engine topology, run conditions are supplied separately, and analysis/output
+settings are controlled by a run manifest.
 
-## Features
+The current overhaul branch introduces a YAML-first configuration layer while
+preserving the existing stable solver behavior.
 
-- **Component-based engine modeling** — build any engine cycle by connecting components in a graph
-- **Three run modes** — steady-state Newton-Raphson, transient Radau integration, and linearization
-- **JANNAF performance** — simplified efficiency-factor chain (η_c*, η_Cd, η_v, η_div)
-- **Thermodynamics** — ideal gas (testing), CoolProp (LOX/LH2/LCH4), Cantera (combustion)
-- **Stiff ODE integration** — SciPy Radau handles acoustic-to-thermal timescale ratios of 10⁵
-- **Phase 1 DAE foundation** — ordered variable/residual registries, structured layout evaluation, and scaled nonlinear solve diagnostics
-- **Performance maps** — import test data, simulation results, or analytical models as maps on any axis (pressure, speed, temperature, cross-component values) and plug them into any component parameter
-- **Test profiles** — multi-phase sequential simulations with safety limits and automatic abort
-- **Monte Carlo analysis** — Latin Hypercube and Saltelli sampling, parallel runs, Sobol sensitivity indices
-- **Regenerative cooling** — lumped `RegenChannel` with Bartz hot-side HTC, Dittus-Boelter coolant HTC, and wall temperature dynamics
-- **Validated** against ROCKETS TTBE reference data (c* within 0.04%, Isp within 3.3%)
+## What Is Implemented
+
+- Component graph modelling with typed fluid, shaft, and thermal ports.
+- Steady-state trim with the existing Newton-based solver.
+- Transient integration with SciPy Radau.
+- Performance maps loaded from YAML references to constants, CSV files, or HDF5.
+- Modular YAML files for engine topology, maps, boundaries, telemetry, and
+  analysis settings.
+- Monte Carlo and sweep analysis using existing runner infrastructure.
+- Eight maintained YAML-driven examples:
+  - `examples/04_gg_single_shaft_mc_sweep/run.py`
+  - `examples/09_ffsc_lox_methane/run.py`
+  - `examples/10_gg_lox_methane/run.py`
+  - `examples/13_tca_pms_runbox/run.py`
+  - `examples/14_tca_pms_valve_timing/run.py`
+  - `examples/15_valve_volume_transient/run.py`
+  - `examples/16_two_valve_transient_chain/run.py`
+  - `examples/17_tca_propellant_valve_transient/run.py`
+
+Legacy examples have been removed so these maintained examples are the canonical
+starting points.
 
 ## Installation
 
-```bash
-pip install -e ".[dev]"
+Create a virtual environment with Python 3.11 or newer:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-**Requirements:** Python 3.11+, NumPy, SciPy, CoolProp, Cantera, Pydantic
+If Python is not on `PATH`, use the full executable path:
 
-## Quick Start
-
-### Steady-State Single Volume
-
-```python
-from atha.thermo.ideal_gas import IdealGasBackend
-from atha.components.volume import Volume
-from atha.core.engine import Engine
-from atha.solver.steady_state import SteadyStateSolver
-
-gas = IdealGasBackend(gamma=1.4, R=287.0)
-vol = Volume("chamber", volume=0.01, thermo=gas, initial_P=1e5, initial_T=300.0)
-vol.add_inlet("inlet")
-vol.add_outlet("outlet")
-
-engine = Engine("test")
-engine.add_component(vol)
-layout = engine.compile()
-
-X0 = layout.assemble_state_vector()
-bcs = {"inlet.mdot": 1.0, "inlet.h": gas.state_from_PT(1e5, 300.0).h,
-       "outlet.mdot": 1.0}
-
-solver = SteadyStateSolver(layout)
-X_ss = solver.solve(X0, bcs)
+```powershell
+C:\Users\tyler\AppData\Local\Programs\Python\Python311\python.exe -m venv .venv
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-### Transient Pressure Rise
-
-```python
-from atha.solver.transient import TransientSolver
-
-solver = TransientSolver(layout, method="Radau", max_step=0.05)
-
-def bcs(t):
-    return {"inlet.mdot": 0.1, "inlet.h": gas.state_from_PT(1e5, 300.0).h}
-
-result = solver.integrate((0.0, 5.0), X0, bcs)
-P = result.get("chamber", "P")   # numpy array over time
-print(f"Final pressure: {P[-1]/1e5:.2f} bar")
-```
-
-### Nozzle Performance (JANNAF)
-
-```python
-from atha.jannaf.simplified import SimplifiedJANNAF
-from atha.jannaf.efficiency import JANNAFEfficiencies
-from atha.thermo.ideal_gas import IdealGasBackend
-
-thermo = IdealGasBackend(gamma=1.24, R=711.0)   # LOX/LH2 products at MR=6
-eff = JANNAFEfficiencies(eta_cstar=0.975, eta_Cd=0.98,
-                          eta_velocity=0.99, eta_divergence=0.9830)
-# First argument must be a ThermoBackend (gas), not JANNAFEfficiencies.
-jannaf = SimplifiedJANNAF(thermo=thermo, efficiencies=eff,
-                           throat_area=0.0687, exit_area=0.0687*77.5,
-                           ambient_pressure=0.0)  # vacuum
-
-result = jannaf.compute(P_chamber=20.6e6, T_chamber=3560.0,
-                         MR=6.0, mdot_total=468.0)
-print(f"Isp: {result.Isp:.1f} s   Thrust: {result.thrust/1000:.1f} kN")
-```
-
-### TTBE Validation Run
-
-```python
-from atha.validation.ttbe import run_ttbe_100pct_rpl
-
-r = run_ttbe_100pct_rpl()
-print(f"c*:    {r.c_star:.1f} m/s  (ref: 2365)")
-print(f"Isp:   {r.Isp_vacuum:.1f} s    (ref: ~453)")
-print(f"Thrust:{r.thrust_vacuum/1000:.1f} kN")
-```
-
-## Project Layout
-
-```
-atha/
-├── core/          # Engine graph, compile step, port system
-├── solver/        # SteadyStateSolver, TransientSolver, nonlinear utilities
-├── thermo/        # IdealGasBackend, CoolPropBackend, CanteraBackend
-├── components/    # Volume, Rotor, Pipe, Nozzle, Pump, Turbine, ...
-├── jannaf/        # Simplified performance calculation
-├── maps/          # PerformanceMap — any-axis interpolation from data, scatter, callable
-├── profiles/      # Multi-phase test profiles, safety limits, HDF5 I/O
-├── monte_carlo/   # Uncertainty quantification, Sobol sensitivity, parallel runs
-├── validation/    # TTBE reference model
-└── examples/      # Gas generator, staged combustion, pressure-fed
-
-tests/
-├── unit/          # Per-component and solver tests
-└── integration/   # Multi-component and end-to-end scenarios
-
-development/       # Technical reference documents
-```
-
-## Numerical Core Status
-
-ATHA is being migrated toward an index-1 DAE architecture for realistic engine
-cycle simulation. The first Phase 1 pieces are now available:
-
-- `VariableRegistry` and `ResidualRegistry` record ordered metadata for states,
-  algebraic variables, commands, parameters, outputs, and residuals.
-- `EngineLayout.evaluate(t, X, Z, U)` returns an `EvaluationResult` containing
-  `dXdt`, algebraic residuals, named outputs, residual names, and residual
-  scales.
-- Compiled fluid, shaft, and thermal connections register named residuals such
-  as `connection.source.outlet__sink.inlet.mdot`, giving solver diagnostics a
-  first-class view of graph coupling constraints.
-- `TransientSolver` now routes RHS evaluation through `EngineLayout.evaluate`,
-  preserving existing boundary-condition dictionary workflows while creating a
-  common path for algebraic solves.
-- `atha.solver.nonlinear.solve_nonlinear` provides the initial dense
-  finite-difference Newton utility with residual scaling and named diagnostics.
-- For square component-level algebraic systems, `TransientSolver` solves `Rz=0`
-  inside the RHS and warm-starts from the previous successful `Z`.
-
-Current limitation: this is a compatibility foundation, not the completed DAE
-engine solver. Connection constraints are now registered and evaluated, but they
-are not yet backed by a full port-variable `Z` vector or included in a square
-global algebraic solve. That assembled connection solve is the next Phase 1 step
-before broad component-fidelity upgrades.
+Core dependencies include NumPy, SciPy, CoolProp, Cantera, PyYAML, h5py, joblib,
+SALib, matplotlib, and pytest.
 
 ## Running Tests
 
-```bash
-pytest tests/ -v                          # all tests
-pytest tests/unit/ -v                     # unit only
-pytest tests/integration/ -v              # integration only
-pytest tests/ --co -q                     # list test names
+```powershell
+.venv\Scripts\python.exe -m pytest tests -q
+.venv\Scripts\python.exe -m pytest tests\unit -q
+.venv\Scripts\python.exe -m pytest tests\integration -q
 ```
 
-## Test Profiles
+Current verified result on this branch:
 
-Test profiles define multi-phase engine firing sequences. Each phase runs in sequence; the final state vector of one phase becomes the initial condition of the next. A hard safety limit anywhere in the sequence triggers an immediate abort and returns a failed `TestProfileResult`.
+```text
+255 passed
+```
 
-### Phase Modes
+## YAML Configuration Model
 
+ATHA uses one top-level **Analysis YAML** as the run entrypoint. That file
+references the other modular files.
 
-| Mode          | Description                                               |
-| ------------- | --------------------------------------------------------- |
-| `STEADY_TRIM` | Newton-Raphson solve to find a stationary operating point |
-| `TRANSIENT`   | Time-integration driven by `ControlCommand` schedules     |
-| `DWELL`       | Hold the current state vector for a fixed duration        |
+```yaml
+name: gg_lox_methane
+engine: engine.yaml
 
+maps:
+  lox_pump_efficiency: maps/lox_pump_efficiency.yaml
+  fuel_pump_efficiency: maps/fuel_pump_efficiency.yaml
 
-### Defining a Multi-Phase Profile
+boundary_conditions: boundaries.yaml
+telemetry: telemetry.yaml
+
+solver:
+  steady_trim:
+    tol: 1.0e-8
+    max_iter: 200
+
+analysis:
+  type: nominal_mc_sweep
+  speed_sweep:
+    rpm_min: 15000
+    rpm_max: 33000
+    points: 15
+```
+
+### Engine YAML
+
+The Engine YAML defines stable hardware structure:
+
+- components
+- component parameters
+- map slots
+- connections/layout
+
+Example component with a map slot:
+
+```yaml
+components:
+  lox_pump:
+    type: Pump
+    parameters:
+      diameter: 0.085
+      pump_map:
+        mdot_design: 4.56
+        dP_design: 15.1e6
+        speed_design: 28000
+        efficiency_design: 0.70
+    maps:
+      efficiency_map:
+        ref: lox_pump_efficiency
+        output: efficiency
+```
+
+Example connection:
+
+```yaml
+connections:
+  - from: lox_pump.outlet
+    to: lox_inj.inlet
+    domain: fluid
+```
+
+### Map YAML
+
+Map YAML files define where map data comes from. Small maps can be constants;
+larger maps should reference CSV or HDF5 data exported from tests, simulations,
+or component sweeps.
+
+Constant map:
+
+```yaml
+name: lox_pump_efficiency
+kind: constant
+source:
+  type: constant
+  values:
+    efficiency: 0.70
+outputs:
+  - name: efficiency
+```
+
+CSV map:
+
+```yaml
+name: pump_combo
+kind: structured_grid
+source:
+  type: csv
+  path: data/pump_combo.csv
+axes:
+  - name: corrected_speed
+    column: Nc
+  - name: corrected_flow
+    column: Wc
+outputs:
+  - name: head
+    column: head_j_per_kg
+  - name: efficiency
+    column: eta
+interpolation:
+  extrapolation: clamp
+```
+
+Multiple component map slots can reference the same multi-output map:
+
+```yaml
+maps:
+  head_map:
+    ref: pump_combo
+    output: head
+  efficiency_map:
+    ref: pump_combo
+    output: efficiency
+```
+
+### Transients YAML
+
+Transient YAML files define actual component response to commanded values. The
+test script should command paths in `timings.yaml`; the transient library
+defines how the hardware state moves.
+
+```yaml
+transients: transients.yaml
+```
+
+```yaml
+name: actuator_transients
+transients:
+  main_valve:
+    type: first_order
+    input: main_valve.command
+    output: main_valve.position
+    initial: 0.0
+    parameters:
+      time_constant: 0.35
+      lower_limit: 0.0
+      upper_limit: 1.0
+```
+
+Supported scalar response types are `table`, `first_order`, `second_order`,
+`linear`, and `rate_limited`.
+
+### Boundary Conditions YAML
+
+Boundary conditions are imposed physical values from the test stand or
+environment. They can be constant or time-varying.
+
+```yaml
+name: boundaries
+time_unit: s
+conditions:
+  lox_tank.outlet.P: {value: 4.0e5, units: Pa}
+  lox_tank.outlet.T: {value: 91.0, units: K}
+  nozzle.ambient.P: {value: 0.0, units: Pa}
+  shaft.omega_override:
+    schedule:
+      type: table
+      values:
+        - [0.0, 1000.0]
+        - [1.0, 2300.0]
+```
+
+Supported schedule types are `constant`, `step`, `ramp`, and `table`.
+
+### Telemetry YAML
+
+Telemetry files define the channels to export or plot.
+
+```yaml
+name: telemetry
+sample_rate_hz: 100
+channels:
+  - alias: PC
+    source: chamber.P
+    units: MPa
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+exports:
+  csv: true
+  hdf5: true
+```
+
+## Running The Examples
+
+Each maintained example is self-contained under `examples/<analysis>/`.
+The Python entrypoint is `run.py`; YAML files live in that analysis folder's
+`configs/` directory.
+
+```powershell
+.venv\Scripts\python.exe examples\04_gg_single_shaft_mc_sweep\run.py
+.venv\Scripts\python.exe examples\09_ffsc_lox_methane\run.py
+.venv\Scripts\python.exe examples\10_gg_lox_methane\run.py
+.venv\Scripts\python.exe examples\13_tca_pms_runbox\run.py
+.venv\Scripts\python.exe examples\14_tca_pms_valve_timing\run.py
+.venv\Scripts\python.exe examples\15_valve_volume_transient\run.py
+.venv\Scripts\python.exe examples\16_two_valve_transient_chain\run.py
+.venv\Scripts\python.exe examples\17_tca_propellant_valve_transient\run.py
+```
+
+Outputs are written to `outputs/`, including Monte Carlo HDF5 results and sweep
+plots where applicable.
+
+### Example 04
+
+`examples/04_gg_single_shaft_mc_sweep/run.py`
+
+Gas-generator LOX/ethanol cycle with one turbopump shaft. Runs:
+
+- nominal steady trim
+- pump/GG uncertainty Monte Carlo
+- shaft-speed sweep
+
+Config directory:
+
+```text
+examples/04_gg_single_shaft_mc_sweep/configs/
+```
+
+### Example 09
+
+`examples/09_ffsc_lox_methane/run.py`
+
+Full-flow staged-combustion LOX/methane cycle with two shafts, preburners, a
+regen channel, and a startup profile.
+
+Config directory:
+
+```text
+examples/09_ffsc_lox_methane/configs/
+```
+
+### Example 10
+
+`examples/10_gg_lox_methane/run.py`
+
+Gas-generator LOX/methane cycle with one shaft and regenerative cooling. Runs:
+
+- nominal steady trim
+- pump/GG uncertainty Monte Carlo
+- shaft-speed sweep
+
+Config directory:
+
+```text
+examples/10_gg_lox_methane/configs/
+```
+
+### Example 13
+
+`examples/13_tca_pms_runbox/run.py`
+
+Simple thrust chamber assembly with LOX mass-flow injector, methane mass-flow
+injector, chamber, and nozzle. It consumes a time-tagged PMS target profile of
+total mass flow and OF. The current example profile traces a runbox around the
+nominal operating point from example 09:
+
+```text
+mdot_lox   = 4.23 kg/s
+mdot_fuel  = 1.21 kg/s
+mdot_total = 5.44 kg/s
+OF         = 3.50
+```
+
+The default runbox traces the perimeter of:
+
+```text
+mdot_total = 80-120% of setpoint
+OF         = 85-115% of setpoint
+```
+
+The PMS profile is defined in:
+
+```text
+examples/13_tca_pms_runbox/configs/operating_conditions.yaml
+```
+
+The time-tagged target profile is loaded from a separate data file referenced by
+that YAML:
+
+```yaml
+schedule:
+  type: profile
+  source:
+    type: json
+    path: data/pms_runbox_targets.json
+  time_column: time_s
+  outputs:
+    mdot_total: mdot_total
+    OF: OF
+```
+
+The JSON file contains test-style targets:
+
+```json
+{
+  "targets": [
+    {"time_s": 0.0, "mdot_total": 4.352, "OF": 2.971515},
+    {"time_s": 0.25, "mdot_total": 4.662857, "OF": 2.971515}
+  ]
+}
+```
+
+CSV target profiles are also supported:
+
+```yaml
+schedule:
+  type: profile
+  source:
+    type: csv
+    path: data/pms_targets.csv
+  time_column: time_s
+  outputs:
+    mdot_total: mdot_total
+    OF: OF
+```
+
+Paths are resolved relative to the operating-conditions YAML file.
+
+The injector commands are defined with null controllers in:
+
+```text
+examples/13_tca_pms_runbox/configs/controllers.yaml
+```
+
+In this context, null controllers pass `pms.mdot_total` and `pms.OF` through to
+command aliases. The `of_mass_flow_split` controller then calculates methane and
+LOX injector mass flows from total mass flow and OF.
+
+Outputs:
+
+```text
+outputs/tca_pms_runbox.csv
+outputs/tca_pms_runbox.png
+```
+
+Config directory:
+
+```text
+examples/13_tca_pms_runbox/configs/
+```
+
+### Example 14
+
+`examples/14_tca_pms_valve_timing/run.py`
+
+Copy of the simple TCA PMS profile with upstream LOX and methane valves added
+ahead of the injectors. The PMS target profile still provides `mdot_total` and
+`OF`; the run starts with a two-second closed-valve dwell from `t=-2 s` to
+`t=0 s`. `timings.yaml` then ramps both valves open from `t=0 s` to `t=0.75 s`.
+The controller calculates LOX/methane mass-flow commands and gates them by the
+timed valve positions.
+
+Timing file:
+
+```text
+examples/14_tca_pms_valve_timing/configs/timings.yaml
+```
+
+Outputs:
+
+```text
+outputs/tca_pms_valve_timing.csv
+outputs/tca_pms_valve_timing.png
+```
+
+### Example 15
+
+`examples/15_valve_volume_transient/run.py`
+
+Minimal transient response demonstration: a timed valve opens into a downstream
+gas volume with actuator lag and an outlet flow-inertia state. The valve command
+comes from `timings.yaml`; actual valve position, downstream pressure, and
+inlet/outlet mass flow are exported from `telemetry.yaml`. Pressure and outlet
+mass flow are solved as separate dynamic states, so the outlet flow no longer
+has the same normalized rise as downstream pressure.
+
+Outputs:
+
+```text
+outputs/valve_volume_transient.csv
+outputs/valve_volume_transient.png
+```
+
+### Example 16
+
+`examples/16_two_valve_transient_chain/run.py`
+
+Two fixed-supply valve trains feeding pipes, injectors, a chamber, and a
+nozzle. Both valve commands start at 20 percent. Valve A uses a linear transient
+definition and opens over two seconds from `t=0`; valve B uses a first-order
+transient definition and receives its open command one second later. The example
+demonstrates `transients.yaml` as the hardware response layer separate from
+`timings.yaml` command events.
+
+Outputs:
+
+```text
+outputs/two_valve_transient_chain.csv
+outputs/two_valve_transient_chain.png
+```
+
+### Example 17
+
+`examples/17_tca_propellant_valve_transient/run.py`
+
+Methane/LOX thrust chamber transient with one methane valve and one LOX valve
+upstream of separate injectors feeding a shared chamber and nozzle. Both valves
+start at 20 percent. The methane valve uses a linear transient and opens over
+two seconds from `t=0`; the LOX valve receives its open command at `t=1 s` and
+follows a first-order transient response.
+
+Outputs:
+
+```text
+outputs/tca_propellant_valve_transient.csv
+outputs/tca_propellant_valve_transient.png
+```
+
+## Programmatic Loading
+
+The config layer can be used directly:
 
 ```python
-from atha.profiles import (
-    PhaseDefinition, PhaseMode, ControlCommand,
-    SafetyLimit, TestProfile,
-)
-from atha.thermo.ideal_gas import IdealGasBackend
-from atha.components.volume import Volume
-from atha.core.engine import Engine
-
-# --- build engine ---
-gas = IdealGasBackend(gamma=1.4, R=287.0)
-vol = Volume("chamber", volume=0.01, thermo=gas, initial_P=1e5, initial_T=300.0)
-vol.add_inlet("inlet")
-engine = Engine("e")
-engine.add_component(vol)
-layout = engine.compile()
-X0 = layout.assemble_state_vector()
-h_ref = gas.state_from_PT(1e5, 300.0).h
-
-# --- define profile ---
-profile = TestProfile(
-    name="fill_sequence",
-    phases=[
-        # Phase 1: trim to steady state with no inflow
-        PhaseDefinition(
-            name="pre_fill_trim",
-            mode=PhaseMode.STEADY_TRIM,
-            duration=5.0,
-            trim_targets={"inlet.mdot": 0.0},
-        ),
-        # Phase 2: open valve ramp — mdot rises linearly 0→0.1 kg/s over 2 s
-        PhaseDefinition(
-            name="fill",
-            mode=PhaseMode.TRANSIENT,
-            duration=2.0,
-            control_commands=[
-                ControlCommand("inlet.mdot", fn=lambda t: 0.05 * t),
-                ControlCommand("inlet.h",   fn=lambda t: h_ref),
-            ],
-            recording_rate_hz=100.0,   # sample rate for stored time series
-        ),
-        # Phase 3: hold at end state
-        PhaseDefinition(
-            name="hold",
-            mode=PhaseMode.DWELL,
-            duration=1.0,
-        ),
-    ],
-    global_limits=[
-        # Hard limit: abort if chamber pressure exceeds 2 bar
-        SafetyLimit("P_max", component_name="chamber", state_name="P",
-                    upper_limit=2e5, is_hard=True),
-    ],
-)
-
-result = profile.execute(layout, X0)
-```
-
-### Reading Results
-
-```python
-if result.success:
-    print(f"Total duration: {result.total_duration:.2f} s")
-
-    # Access a single phase
-    fill = result.get_phase("fill")
-    P = fill.get("chamber", "P")   # numpy array at recorded time points
-    print(f"Peak pressure: {P.max()/1e5:.2f} bar")
-
-    # Stitch all phases into a single continuous timeline
-    t_all, X_all = result.get_combined()
-
-    # Quick matplotlib overview of every state across all phases
-    result.plot_timeline()
-
-else:
-    print(f"Abort: {result.abort_reason} at t={result.abort_time:.3f} s")
-```
-
-### Saving and Loading
-
-```python
-from atha.profiles.io import save_profile_result, load_profile_result
-
-save_profile_result(result, "fill_sequence.hdf5")
-loaded = load_profile_result("fill_sequence.hdf5")
-```
-
-The HDF5 file stores one group per phase (`phase_000`, `phase_001`, …), each containing `t`, `X`, and `state_names` datasets plus metadata attributes for `abort_triggered`, `name`, etc.
-
----
-
-## Monte Carlo Analysis
-
-The `atha.monte_carlo` package propagates parametric uncertainty through any callable model, records per-run results, and computes Sobol first-order and total-order sensitivity indices.
-
-### Defining Uncertain Parameters
-
-```python
-from atha.monte_carlo import UncertainParameter, ParameterType
-
-params = [
-    # Normal distribution: mean=0.975, σ=0.005
-    UncertainParameter("eta_cstar", ParameterType.NORMAL, mean=0.975, std=0.005),
-    # Uniform distribution: chamber pressure ±5%
-    UncertainParameter("P_chamber", ParameterType.UNIFORM, low=19.0e6, high=21.0e6),
-    # Log-normal: positive-definite quantities (e.g., oxidiser flow rate)
-    UncertainParameter("mdot_ox", ParameterType.LOGNORMAL, mean=400.0, std=8.0),
-]
-```
-
-### Running a Monte Carlo Sweep
-
-```python
-from atha.monte_carlo import MonteCarloRunner
-
-def evaluate(X: dict) -> float:
-    """Return a scalar metric for one sample.  X maps param.name → value."""
-    eff.eta_cstar = X["eta_cstar"]
-    res = jannaf.compute(P_chamber=X["P_chamber"], T_chamber=3560.0,
-                         MR=6.0, mdot_total=468.0)
-    return res.Isp
-
-runner = MonteCarloRunner(
-    params=params,
-    evaluate_fn=evaluate,
-    n_samples=500,
-    sampler="lhs",      # "lhs" (Latin Hypercube) or "saltelli" (Sobol sequences)
-    n_jobs=4,           # parallel workers via joblib; -1 = all cores
-    seed=42,
-)
-result = runner.run()
-result.print_summary()
-```
-
-`print_summary()` output:
-
-```
-MonteCarloResult — 500 samples
-  mean     : 452.7 s
-  std      :   3.1 s
-  CV       :   0.7 %
-  5th/95th : 447.5 / 457.9 s
-  95 % CI  : [452.4, 453.0]
-```
-
-### Plotting
-
-```python
-result.plot_histogram(bins=40, title="Isp distribution")
-```
-
-### Sobol Sensitivity Indices
-
-Sobol indices require samples generated with the Saltelli scheme (`sampler="saltelli"`). Use a power-of-2 base count for clean convergence.
-
-```python
-from atha.monte_carlo.sensitivity import compute_sobol_indices
-
-runner = MonteCarloRunner(
-    params=params,
-    evaluate_fn=evaluate,
-    n_samples=128,         # N_base; total evaluations = N_base * (k + 2)
-    sampler="saltelli",
-    seed=42,
-)
-result = runner.run()
-
-sobol = compute_sobol_indices(
-    params=params,
-    param_samples=result.param_samples,   # shape (N_total, k)
-    Y=result.Y,                           # shape (N_total,)
-    N_base=128,
-)
-
-print(sobol)
-# {
-#   "S1":      {"eta_cstar": 0.62, "P_chamber": 0.03, "mdot_ox": 0.01, ...},
-#   "ST":      {"eta_cstar": 0.65, "P_chamber": 0.05, "mdot_ox": 0.02, ...},
-#   "S1_conf": {...},
-#   "ST_conf": {...},
-# }
-
-result.plot_sobol_indices(sobol)
-```
-
-### Monte Carlo over Full Test Profiles
-
-`ProfileMonteCarloRunner` applies parameter perturbations to a complete `TestProfile` execution. Failed runs (aborts or solver errors) are recorded as `NaN` and excluded from statistics.
-
-```python
-from atha.monte_carlo import ProfileMonteCarloRunner
-
-def apply_params(profile_template, param_values: dict) -> "TestProfile":
-    """Return a new profile with perturbed parameters."""
-    # Clone the profile, update component parameters, return modified copy
-    ...
-
-def extract_metric(profile_result) -> float:
-    """Pull a scalar from the completed TestProfileResult."""
-    fill = profile_result.get_phase("fill")
-    return float(fill.get("chamber", "P").max())
-
-runner = ProfileMonteCarloRunner(
-    params=params,
-    profile=profile,
-    layout=layout,
-    X0=X0,
-    apply_params_fn=apply_params,
-    extract_metric=extract_metric,
-    n_samples=200,
-    sampler="lhs",
-    n_jobs=-1,
-    seed=0,
-)
-result = runner.run()
-result.print_summary()
-```
-
-### Saving and Loading MC Results
-
-```python
-result.save("isp_mc_500.hdf5")
-
-from atha.monte_carlo.results import MonteCarloResult
-loaded = MonteCarloResult.load("isp_mc_500.hdf5")
-```
-
----
-
-## Performance Maps
-
-`PerformanceMap` is a general-purpose multi-axis interpolation object. Its axes can be **any named quantity** — component states, flow inputs, BCS values, computed outputs, or cross-component values. Maps are used to replace scalar parameters in any component with physics derived from test data, simulations, or analytical correlations.
-
-### Creating Maps
-
-#### From structured grid data
-
-```python
-import numpy as np
-from atha.maps import PerformanceMap
-
-# 1-D map: CdA as a function of upstream pressure
-P_cal   = np.array([0.5e5, 1e5, 2e5, 3e5, 5e5])
-CdA_cal = np.array([8e-5,  1e-4, 1.4e-4, 1.65e-4, 1.9e-4])
-
-cda_map = PerformanceMap.from_arrays(
-    axes={"inlet.P": P_cal},
-    outputs={"CdA": CdA_cal},
-    extrapolation="clamp",   # "clamp" | "warn" | "error"
-)
-
-# 2-D map: pump efficiency over speed × flow
-omega_vals = np.linspace(15000, 28000, 8) * np.pi / 30  # rad/s
-mdot_vals  = np.linspace(0.5, 2.5, 10)                  # kg/s
-eta_grid   = ...                                          # shape (8, 10)
-
-eta_map = PerformanceMap.from_arrays(
-    axes={"shaft.omega": omega_vals, "inlet.mdot": mdot_vals},
-    outputs={"efficiency": eta_grid},
-)
-```
-
-#### From scattered test data (RBF interpolation)
-
-```python
-# Test-measured discharge coefficients at arbitrary (ΔP, T) points
-dP_meas  = np.array([5e4, 1e5, 2e5, 3e5, ...])   # Pa
-T_meas   = np.array([270, 295, 310, 290,  ...])   # K
-Cd_meas  = np.array([0.70, 0.72, 0.74, 0.73, ...])
-
-cd_map = PerformanceMap.from_scattered(
-    points={"dP": dP_meas, "inlet.T": T_meas},
-    outputs={"Cd": Cd_meas},
-)
-```
-
-#### From a callable (analytical model or another simulator)
-
-```python
-def eta_cstar_model(**kw):
-    Pc = kw["chamber.P"]
-    MR = kw["MR"]
-    return {"eta_cstar": 0.97 * (1.0 - 0.01 * abs(MR - 2.8))}
-
-cstar_map = PerformanceMap.from_callable(
-    fn=eta_cstar_model,
-    axes=["chamber.P", "MR"],
-    outputs=["eta_cstar"],
-    bounds={"chamber.P": (0.5e6, 5e6), "MR": (1.5, 5.0)},
-)
-```
-
-#### Constant (no axes)
-
-```python
-pm = PerformanceMap.constant(eta_cstar=0.975, Cd=0.72)
-pm()   # → {"eta_cstar": 0.975, "Cd": 0.72}
-```
-
-### Evaluating Maps
-
-All maps share a unified evaluation interface.  At integration time, each component builds a **context dict** from its states and inputs, then passes it to the map.  The map extracts only the axes it declared by name — all other keys are silently ignored.
-
-```python
-# Simple axis names — keyword convenience
-result = cda_map(inlet_P=2e5)
-
-# Axis names with dots (e.g. "inlet.P") — must use evaluate()
-result = cda_map.evaluate({"inlet.P": 2e5, "shaft.omega": 2094.4})
-# {"CdA": 1.4e-4}
-
-# evaluate() accepts the full BCS context — extra keys ignored
-bcs = {"inlet.P": 2e5, "inlet.T": 300.0, "inlet.rho": 1141.0, "outlet.P": 1e5}
-result = cda_map.evaluate(bcs)
-```
-
-### Using Maps with Components
-
-Pass a `PerformanceMap` as an optional keyword argument to any supported component.  The component falls back to its scalar value if no map is provided.
-
-
-| Component             | Argument              | Map output key      | Replaces                              |
-| --------------------- | --------------------- | ------------------- | ------------------------------------- |
-| `Pump`                | `efficiency_map`      | `"efficiency"`      | scalar `efficiency`                   |
-| `Turbine`             | `efficiency_map`      | `"efficiency"`      | scalar `efficiency`                   |
-| `Nozzle`              | `cf_map`              | `"Cf"`              | JANNAF Cf calculation                 |
-| `Nozzle`              | `discharge_coeff_map` | `"discharge_coeff"` | scalar `discharge_coeff`              |
-| `OrificeCompressible` | `cd_map`              | `"Cd"`              | scalar `discharge_coeff`              |
-| `OrificeCompressible` | `cda_map`             | `"CdA"`             | `discharge_coeff × area`              |
-| `Valve`               | `cd_map`              | `"Cd"`              | scalar `discharge_coeff`              |
-| `Valve`               | `cda_map`             | `"CdA"`             | `discharge_coeff × A_frac × max_area` |
-
-
-```python
-from atha.components.orifice import OrificeCompressible
-
-# Bellows orifice — CdA grows with pressure
-orifice = OrificeCompressible("bellows", area=1e-4, cda_map=cda_map)
-
-# Pump with full hill chart
-from atha.components.pump import Pump
-pump = Pump("lox_pump", delta_P_design=2.7e6, mdot_design=1.93,
-            omega_design=22000 * np.pi / 30, efficiency_map=eta_map)
-
-# Cross-component map: Isp is a function of turbine exit temperature
-#   axes span two components — this is fully supported
-isp_map = PerformanceMap.from_arrays(
-    axes={"turbine.T_exit": np.linspace(900, 1300, 5),
-          "chamber.P":      np.linspace(1e6, 3e6, 5)},
-    outputs={"Isp": isp_grid},
-)
-# At evaluation time, pass the combined BCS context:
-isp_map.evaluate({"turbine.T_exit": 1050.0, "chamber.P": 2.1e6})
-```
-
-### Extrapolation Modes
-
-
-| Mode                | Behaviour                                 |
-| ------------------- | ----------------------------------------- |
-| `"clamp"` (default) | Silently clips axis values to data bounds |
-| `"warn"`            | Clips, but emits a `UserWarning`          |
-| `"error"`           | Raises `ValueError`                       |
-
-
-### Saving and Loading
-
-```python
-# Array-backed and scattered maps save directly
-pm.save("my_map.h5")
-pm2 = PerformanceMap.load("my_map.h5")
-
-# Callable maps must be rasterised first
-grid = {"chamber.P": np.linspace(0.5e6, 5e6, 30),
-        "MR":        np.linspace(1.5, 5.0, 30)}
-pm_arr = callable_map.rasterize(grid)
-pm_arr.save("eta_cstar_rasterised.h5")
-```
-
----
-
-## Regenerative Cooling
-
-`RegenChannel` models a lumped regenerative cooling jacket around the combustion chamber and nozzle.  Methane (or any coolant) flows through the channel, absorbs heat from the hot gas wall, then enters the injector at elevated enthalpy.
-
-### Physics
-
-
-| Side           | Correlation                       | Notes                                         |
-| -------------- | --------------------------------- | --------------------------------------------- |
-| Hot (gas)      | Simplified Bartz, pressure-scaled | `h_hot = h_hot_design × (Pc/Pc_design)^0.8`   |
-| Cool (coolant) | Dittus-Boelter, turbulent heating | `Nu = 0.023 Re^0.8 Pr^0.4` (laminar: Nu=3.66) |
-| Pressure drop  | Darcy-Weisbach + Churchill (1977) | Valid all Re, smooth to rough                 |
-
-
-Wall temperature (single dynamic state):
-
-```
-dT_wall/dt = (Q_hot − Q_cool) / (m_wall × Cp_wall)
-```
-
-Coolant energy and momentum balance (algebraic):
-
-```
-h_out = h_in + Q_cool / ṁ
-ΔP    = f (L/D_h) ρ v² / 2
-```
-
-### Ports and Inputs
-
-
-| Port / Input         | Description                          | Units |
-| -------------------- | ------------------------------------ | ----- |
-| `coolant_inlet.mdot` | Coolant mass flow                    | kg/s  |
-| `coolant_inlet.P`    | Coolant inlet pressure               | Pa    |
-| `coolant_inlet.h`    | Coolant inlet enthalpy               | J/kg  |
-| `gas.T` *(BCS)*      | Hot gas temperature (from chamber)   | K     |
-| `gas.P` *(BCS)*      | Hot gas pressure (for Bartz scaling) | Pa    |
-
-
-### Outputs
-
-
-| Output             | Description                       | Units    |
-| ------------------ | --------------------------------- | -------- |
-| `coolant_outlet.P` | Outlet pressure after ΔP          | Pa       |
-| `coolant_outlet.h` | Outlet enthalpy after heat pickup | J/kg     |
-| `Q_cool`           | Heat absorbed by coolant          | W        |
-| `Q_hot`            | Heat from hot gas to wall         | W        |
-| `h_hot_coeff`      | Bartz hot-side HTC                | W/(m²·K) |
-| `h_cool_coeff`     | Dittus-Boelter coolant-side HTC   | W/(m²·K) |
-| `T_bulk_out`       | Coolant outlet temperature        | K        |
-| `delta_P`          | Channel pressure drop             | Pa       |
-
-
-### Example
-
-```python
-from atha.components.regen_channel import RegenChannel
-from atha.thermo.coolprop_backend import CoolPropBackend
-
-methane = CoolPropBackend("Methane")
-
-regen = RegenChannel(
-    "regen",
-    fluid=methane,
-    channel_area=5e-5,        # m²   total cross-section
-    hydraulic_diam=3e-3,      # m
-    channel_length=0.8,       # m    chamber + nozzle contour
-    hot_area=0.15,            # m²   gas-side area
-    cool_area=0.18,           # m²   coolant-side area
-    wall_mass=2.5,            # kg   CuCrZr jacket
-    wall_cp=390.0,            # J/(kg·K)
-    h_hot_design=55000.0,     # W/(m²·K)  Bartz at design Pc
-    Pc_design=10e6,           # Pa
-    recovery_factor=0.90,
-    initial_T_wall=300.0,     # K   cold start
+from atha.config import (
+    build_performance_maps,
+    evaluate_boundary_conditions,
+    load_analysis_config,
 )
 
-# Wire into engine: fuel pump → regen → fuel injector
-engine.connect(fuel_pump.port("outlet"),      regen.port("coolant_inlet"))
-engine.connect(regen.port("coolant_outlet"),  fuel_inj.port("inlet"))
-
-# BCS must supply hot-gas conditions
-bcs["gas.T"] = 3500.0   # K  (or read from chamber._state_values in transient)
-bcs["gas.P"] = 10e6     # Pa
+loaded = load_analysis_config("examples/10_gg_lox_methane/configs/analysis.yaml")
+maps = build_performance_maps(loaded.maps)
+bcs_at_start = evaluate_boundary_conditions(loaded.boundary_conditions, 0.0)
 ```
 
-The hot-gas inputs are not connected via a typed port — they are provided as flat BCS keys.  In a transient simulation, update them each step from the live chamber state:
+The returned object contains:
 
-```python
-def make_bcs(t):
-    return {
-        ...,
-        "gas.T": chamber._state_values.get("T", 3500.0),
-        "gas.P": chamber._state_values.get("P", 10e6),
-    }
-```
+- `loaded.analysis_config`
+- `loaded.engine`
+- `loaded.maps`
+- `loaded.transients`
+- `loaded.boundary_conditions`
+- `loaded.operating_conditions`
+- `loaded.timings`
+- `loaded.controllers`
+- `loaded.telemetry`
 
-See `examples/11_regen_channel.py` for a complete GG LOX/CH4 engine with cold-start heat soak transient and throttle sensitivity sweep.
+## Current Solver Notes
 
----
+The examples intentionally use the current stable solver settings:
 
-## Architecture Overview
+- steady trim via `SteadyStateSolver`
+- transient integration via Radau where profiles are used
+- solver tolerances configured in Analysis YAML
 
-ATHA uses a **compile-then-solve** pattern:
-
-1. **Build phase** — Python objects (`Engine`, `Volume`, `Rotor`, ...) connected via typed ports
-2. **Compile** — `Engine.compile()` assigns integer offsets and returns `EngineLayout` with flat numpy arrays
-3. **Solve** — `TransientSolver` or `SteadyStateSolver` operates only on `EngineLayout` and a state vector `X`
-
-This keeps Python overhead out of the hot integration loop. See `development/09_simulation_technical_reference.md` for full technical details.
+The codebase still contains the DAE foundation, but the full global
+port-variable algebraic solve is not complete yet. Until that lands, examples
+may include explicit design flow or shaft override boundary conditions to keep
+the compatibility solver well-conditioned.
 
 ## References
 
-- ROCKETS System: NASA/P&W Final Report, November 1991 (NASA Technical Report 19910011919)
-- JANNAF Performance Manual: CPIA Publication 246, April 1975
-- Cantera: [https://cantera.org](https://cantera.org)
-- CoolProp: [http://www.coolprop.org](http://www.coolprop.org)
-
+- NASA ROCETS report: `resources/19910011919.pdf`
+- JANNAF rocket engine performance reference: `resources/JANNAF ROCKET ENGINE.pdf`

@@ -1,0 +1,109 @@
+name: gg_single_shaft
+units: SI
+components:
+  shaft:
+    type: Rotor
+    parameters:
+      moment_of_inertia: 0.10
+      initial_speed_rpm: 22000
+  lox_pump:
+    type: Pump
+    parameters:
+      diameter: 0.09
+      pump_map:
+        mdot_design: 1.452
+        dP_design: 2.7e6
+        speed_design: 22000
+        efficiency_design: 0.68
+    maps:
+      efficiency_map:
+        ref: lox_pump_efficiency
+        output: efficiency
+  fuel_pump:
+    type: Pump
+    parameters:
+      diameter: 0.07
+      pump_map:
+        mdot_design: 0.519
+        dP_design: 2.7e6
+        speed_design: 22000
+        efficiency_design: 0.65
+    maps:
+      efficiency_map:
+        ref: fuel_pump_efficiency
+        output: efficiency
+  gg:
+    type: GasGenerator
+    parameters:
+      volume: 1.0e-4
+      design_MR: 0.40
+      efficiency: 0.93
+      initial_P: 3.1e6
+      initial_T: 1050.0
+  turbine:
+    type: Turbine
+    parameters:
+      diameter: 0.10
+      turbine_map:
+        PR_design: 2.5
+        eta_design: 0.70
+        mdot_corrected_design: 0.05
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 5.0e-4
+      efficiency: 0.96
+      initial_P: 2.0e6
+      initial_T: 3400.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 1.963e-3
+      exit_area: 1.5704e-2
+      efficiencies:
+        eta_cstar: 0.975
+        eta_divergence: 0.983
+  lox_inj:
+    type: OrificeCompressible
+    parameters:
+      Cd: 0.72
+      area: 1.5e-4
+  fuel_inj:
+    type: OrificeCompressible
+    parameters:
+      Cd: 0.72
+      area: 1.2e-4
+connections:
+  - from: turbine.shaft
+    to: shaft.turbine_in
+    domain: shaft
+  - from: lox_pump.shaft
+    to: shaft.pump_lox
+    domain: shaft
+  - from: fuel_pump.shaft
+    to: shaft.pump_fuel
+    domain: shaft
+  - from: lox_pump.bleed
+    to: gg.lox_inlet
+    domain: fluid
+  - from: fuel_pump.bleed
+    to: gg.fuel_inlet
+    domain: fluid
+  - from: gg.outlet
+    to: turbine.inlet
+    domain: fluid
+  - from: lox_pump.outlet
+    to: lox_inj.inlet
+    domain: fluid
+  - from: fuel_pump.outlet
+    to: fuel_inj.inlet
+    domain: fluid
+  - from: lox_inj.outlet
+    to: chamber.lox_inlet
+    domain: fluid
+  - from: fuel_inj.outlet
+    to: chamber.fuel_inlet
+    domain: fluid
+  - from: chamber.outlet
+    to: nozzle.inlet
+    domain: fluid

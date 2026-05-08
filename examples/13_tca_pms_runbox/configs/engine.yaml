@@ -1,0 +1,38 @@
+name: tca_pms_runbox
+units: SI
+components:
+  lox_inj:
+    type: MassFlowInjector
+    parameters:
+      delta_P_nominal: 1.5e6
+  fuel_inj:
+    type: MassFlowInjector
+    parameters:
+      delta_P_nominal: 1.5e6
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 3.0e-4
+      efficiency: 0.97
+      design_MR: 3.5
+      initial_P: 10.0e6
+      initial_T: 3500.0
+      T_adiabatic: 3600.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 1.03e-3
+      exit_area: 5.15e-2
+      efficiencies:
+        eta_cstar: 0.975
+        eta_divergence: 0.985
+connections:
+  - from: lox_inj.outlet
+    to: chamber.lox_inlet
+    domain: fluid
+  - from: fuel_inj.outlet
+    to: chamber.fuel_inlet
+    domain: fluid
+  - from: chamber.outlet
+    to: nozzle.inlet
+    domain: fluid

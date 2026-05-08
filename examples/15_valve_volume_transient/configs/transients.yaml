@@ -1,0 +1,11 @@
+name: valve_volume_transients
+transients:
+  valve_actuator:
+    type: first_order
+    input: valve.command
+    output: valve.position
+    initial: 0.0
+    parameters:
+      time_constant: 0.35
+      lower_limit: 0.0
+      upper_limit: 1.0

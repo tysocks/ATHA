@@ -104,7 +104,16 @@ class Turbine(BaseComponent):
         omega = inputs.get("shaft.omega", 1000.0)
         gamma = inputs.get("inlet.gamma", self._gamma)
 
-        rho_in = inputs.get("inlet.rho", P_in / max(287.0 * 300.0, 1.0))
+        if "inlet.rho" in inputs:
+            rho_in = inputs["inlet.rho"]
+        else:
+            # If no upstream density was propagated, estimate an ideal-gas
+            # density from h=cp*T.  For JANAF/formation-reference enthalpies
+            # this can be non-positive, so fall back to a benign 300 K guess.
+            T_est = h_in * (gamma - 1.0) / max(gamma * 287.0, 1e-9)
+            if T_est <= 1.0:
+                T_est = 300.0
+            rho_in = P_in / max(287.0 * T_est, 1.0)
         PR = P_in / max(P_out, 1.0)
 
         if self._efficiency_map is not None:

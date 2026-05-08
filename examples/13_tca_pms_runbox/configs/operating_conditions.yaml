@@ -1,0 +1,12 @@
+name: tca_pms_operating_conditions
+targets:
+  pms:
+    schedule:
+      type: profile
+      source:
+        type: json
+        path: data/pms_runbox_targets.json
+      time_column: time_s
+      outputs:
+        mdot_total: mdot_total
+        OF: OF

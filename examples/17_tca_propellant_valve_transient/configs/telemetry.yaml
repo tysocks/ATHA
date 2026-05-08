@@ -1,0 +1,34 @@
+name: tca_propellant_valve_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: TIME
+    source: time
+    units: s
+  - alias: METHANE_VALVE_COMMAND
+    source: methane_valve.command
+  - alias: METHANE_VALVE_POSITION
+    source: methane_valve.position
+  - alias: LOX_VALVE_COMMAND
+    source: lox_valve.command
+  - alias: LOX_VALVE_POSITION
+    source: lox_valve.position
+  - alias: MDOT_METHANE
+    source: methane_pipe.mdot
+    units: kg/s
+  - alias: MDOT_LOX
+    source: lox_pipe.mdot
+    units: kg/s
+  - alias: OF
+    source: chamber.OF
+  - alias: PC
+    source: chamber.P
+    units: bar
+  - alias: NOZZLE_MDOT
+    source: nozzle.mdot
+    units: kg/s
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+exports:
+  csv: true
+  plot: true

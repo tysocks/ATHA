@@ -1,0 +1,7 @@
+name: two_valve_boundaries
+conditions:
+  a_supply.P: {value: 2.8e6, units: Pa}
+  a_supply.rho: {value: 1140.0, units: kg/m3}
+  b_supply.P: {value: 2.2e6, units: Pa}
+  b_supply.rho: {value: 420.0, units: kg/m3}
+  nozzle.ambient.P: {value: 101325.0, units: Pa}

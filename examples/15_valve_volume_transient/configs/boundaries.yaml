@@ -1,0 +1,5 @@
+name: valve_volume_boundaries
+conditions:
+  supply.P: {value: 7.0e5, units: Pa}
+  supply.T: {value: 300.0, units: K}
+  ambient.P: {value: 101325.0, units: Pa}

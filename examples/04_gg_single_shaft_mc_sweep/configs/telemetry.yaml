@@ -1,0 +1,15 @@
+name: gg_single_shaft_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: PC
+    source: chamber.P
+    units: MPa
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+  - alias: SHAFT_RPM
+    source: shaft.omega
+    units: rpm
+exports:
+  csv: true
+  hdf5: true

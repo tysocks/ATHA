@@ -1,0 +1,41 @@
+{
+  "name": "tca_pms_runbox_targets",
+  "description": "Time-tagged PMS target profile for total mass flow and mixture ratio.",
+  "units": {
+    "time_s": "s",
+    "mdot_total": "kg/s",
+    "OF": "-"
+  },
+  "targets": [
+    {"time_s": 0.00, "mdot_total": 4.352000, "OF": 2.971515},
+    {"time_s": 0.25, "mdot_total": 4.662857, "OF": 2.971515},
+    {"time_s": 0.50, "mdot_total": 4.973714, "OF": 2.971515},
+    {"time_s": 0.75, "mdot_total": 5.284571, "OF": 2.971515},
+    {"time_s": 1.00, "mdot_total": 5.595429, "OF": 2.971515},
+    {"time_s": 1.25, "mdot_total": 5.906286, "OF": 2.971515},
+    {"time_s": 1.50, "mdot_total": 6.217143, "OF": 2.971515},
+    {"time_s": 1.75, "mdot_total": 6.528000, "OF": 2.971515},
+    {"time_s": 2.00, "mdot_total": 6.528000, "OF": 3.121339},
+    {"time_s": 2.25, "mdot_total": 6.528000, "OF": 3.271164},
+    {"time_s": 2.50, "mdot_total": 6.528000, "OF": 3.420988},
+    {"time_s": 2.75, "mdot_total": 6.528000, "OF": 3.570813},
+    {"time_s": 3.00, "mdot_total": 6.528000, "OF": 3.720637},
+    {"time_s": 3.25, "mdot_total": 6.528000, "OF": 3.870461},
+    {"time_s": 3.50, "mdot_total": 6.528000, "OF": 4.020285},
+    {"time_s": 3.75, "mdot_total": 6.217143, "OF": 4.020285},
+    {"time_s": 4.00, "mdot_total": 5.906286, "OF": 4.020285},
+    {"time_s": 4.25, "mdot_total": 5.595429, "OF": 4.020285},
+    {"time_s": 4.50, "mdot_total": 5.284571, "OF": 4.020285},
+    {"time_s": 4.75, "mdot_total": 4.973714, "OF": 4.020285},
+    {"time_s": 5.00, "mdot_total": 4.662857, "OF": 4.020285},
+    {"time_s": 5.25, "mdot_total": 4.352000, "OF": 4.020285},
+    {"time_s": 5.50, "mdot_total": 4.352000, "OF": 3.870461},
+    {"time_s": 5.75, "mdot_total": 4.352000, "OF": 3.720637},
+    {"time_s": 6.00, "mdot_total": 4.352000, "OF": 3.570813},
+    {"time_s": 6.25, "mdot_total": 4.352000, "OF": 3.420988},
+    {"time_s": 6.50, "mdot_total": 4.352000, "OF": 3.271164},
+    {"time_s": 6.75, "mdot_total": 4.352000, "OF": 3.121339},
+    {"time_s": 7.00, "mdot_total": 4.352000, "OF": 2.971515},
+    {"time_s": 7.25, "mdot_total": 4.352000, "OF": 2.971515}
+  ]
+}

@@ -1,0 +1,50 @@
+name: gg_single_shaft_mc_sweep
+engine: engine.yaml
+maps:
+  lox_pump_efficiency: maps/lox_pump_efficiency.yaml
+  fuel_pump_efficiency: maps/fuel_pump_efficiency.yaml
+boundary_conditions: boundaries.yaml
+telemetry: telemetry.yaml
+solver:
+  steady_trim:
+    tol: 1.0e-8
+    max_iter: 200
+analysis:
+  type: nominal_mc_sweep
+  fluids:
+    oxidizer: Oxygen
+    fuel: Ethanol
+  combustion:
+    mechanism: gri30.yaml
+    fuel: C2H5OH
+    oxidizer: O2
+  design:
+    Pc: 2.0e6
+  monte_carlo:
+    samples: 120
+    sampler: lhs
+    n_jobs: -1
+    seed: 7
+    result_file: gg_single_shaft_mc.hdf5
+    histogram_file: gg_single_shaft_mc.png
+    parameters:
+      - name: lox_eta_scale
+        distribution: normal
+        settings: {mean: 1.0, std: 0.025}
+      - name: fuel_eta_scale
+        distribution: normal
+        settings: {mean: 1.0, std: 0.025}
+      - name: gg_efficiency
+        distribution: normal
+        settings: {mean: 0.93, std: 0.02}
+      - name: T_lox_inlet
+        distribution: normal
+        settings: {mean: 91.0, std: 0.8}
+      - name: T_fuel_inlet
+        distribution: normal
+        settings: {mean: 293.0, std: 3.0}
+  speed_sweep:
+    rpm_min: 12000
+    rpm_max: 26000
+    points: 15
+    plot_file: gg_single_shaft_speed_sweep.png

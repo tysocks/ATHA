@@ -1,0 +1,7 @@
+name: tca_propellant_valve_boundaries
+conditions:
+  methane_supply.P: {value: 8.0e6, units: Pa}
+  methane_supply.rho: {value: 420.0, units: kg/m3}
+  lox_supply.P: {value: 9.0e6, units: Pa}
+  lox_supply.rho: {value: 1140.0, units: kg/m3}
+  nozzle.ambient.P: {value: 101325.0, units: Pa}

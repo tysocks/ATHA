@@ -1,0 +1,8 @@
+name: tca_pms_runbox_boundaries
+time_unit: s
+conditions:
+  lox_manifold.P: {value: 17.0e6, units: Pa}
+  lox_manifold.T: {value: 91.0, units: K}
+  fuel_manifold.P: {value: 17.0e6, units: Pa}
+  fuel_manifold.T: {value: 108.0, units: K}
+  nozzle.ambient.P: {value: 0.0, units: Pa}

@@ -1,0 +1,32 @@
+name: two_valve_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: TIME
+    source: time
+    units: s
+  - alias: VALVE_A_COMMAND
+    source: valve_a.command
+  - alias: VALVE_A_POSITION
+    source: valve_a.position
+  - alias: VALVE_B_COMMAND
+    source: valve_b.command
+  - alias: VALVE_B_POSITION
+    source: valve_b.position
+  - alias: MDOT_A
+    source: pipe_a.mdot
+    units: kg/s
+  - alias: MDOT_B
+    source: pipe_b.mdot
+    units: kg/s
+  - alias: PC
+    source: chamber.P
+    units: bar
+  - alias: NOZZLE_MDOT
+    source: nozzle.mdot
+    units: kg/s
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+exports:
+  csv: true
+  plot: true

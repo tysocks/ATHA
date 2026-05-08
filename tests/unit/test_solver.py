@@ -122,6 +122,20 @@ def test_transient_solution_get_missing_raises():
         sol.get("vol", "nonexistent")
 
 
+def test_transient_solution_without_initial_sample():
+    sol = TransientSolution(
+        t=np.array([0.0, 0.1, 0.2]),
+        X=np.array([[1.0], [2.0], [3.0]]),
+        state_names=["vol.P"],
+    )
+
+    trimmed = sol.without_initial_sample()
+
+    assert trimmed.t.tolist() == [0.1, 0.2]
+    assert trimmed.get("vol", "P").tolist() == [2.0, 3.0]
+    assert sol.t.tolist() == [0.0, 0.1, 0.2]
+
+
 def test_transient_balanced_flow_stable_pressure():
     gas = IdealGasBackend(gamma=1.4, R=287.0)
     vol = Volume("vol", volume=0.01, thermo=gas, initial_P=1e5, initial_T=300.0)
