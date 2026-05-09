@@ -1,0 +1,8 @@
+name: tca_mdot_controller_operating_conditions
+targets:
+  mdot_total:
+    schedule:
+      type: step
+      time: 5.0
+      initial: 30.0
+      final: 20.0

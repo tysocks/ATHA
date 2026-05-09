@@ -6,14 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-from atha.examples.tca_valve_transient import run_tca_valve_transient
+from atha.runner import run_config_folder
 
 
-CONFIG_PATH = Path(__file__).parent / "configs" / "analysis.yaml"
+CONFIG_PATH = Path(__file__).parent / "configs"
 
 
 def main():
-    result = run_tca_valve_transient(CONFIG_PATH)
+    result = run_config_folder(CONFIG_PATH).require_summary()
     print("\nMethane/LOX TCA valve transient")
     print(f"  Methane valve   : {result.methane_valve_position.min():.3f}-{result.methane_valve_position.max():.3f}")
     print(f"  LOX valve       : {result.lox_valve_position.min():.3f}-{result.lox_valve_position.max():.3f}")

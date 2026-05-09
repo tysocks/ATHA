@@ -20,6 +20,9 @@ dependencies = [
     "SALib>=1.5",
 ]
 
+[project.scripts]
+atha-run = "atha.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov", "plotly>=5.0"]
 
@@ -28,3 +31,10 @@ include = ["atha*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "fast: fast unit and smoke tests",
+    "integration: integration tests that exercise coupled models",
+    "acceptance: acceptance tests and validation gates",
+    "monte_carlo: stochastic or ensemble tests",
+    "slow: slow tests not intended for every edit cycle",
+]

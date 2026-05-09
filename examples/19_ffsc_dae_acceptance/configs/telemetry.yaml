@@ -1,0 +1,75 @@
+name: ffsc_dae_acceptance_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: TIME
+    source: time
+    units: s
+  - alias: TARGET_MDOT_TOTAL
+    source: target.mdot_total
+    units: kg/s
+  - alias: TARGET_OF
+    source: target.OF
+  - alias: MDOT_TOTAL
+    source: mdot.total
+    units: kg/s
+  - alias: MDOT_METHANE
+    source: methane_pump.inlet.mdot
+    units: kg/s
+  - alias: MDOT_LOX
+    source: lox_pump.inlet.mdot
+    units: kg/s
+  - alias: OF
+    source: chamber.OF
+  - alias: METHANE_CROSSOVER_VALVE_COMMAND
+    source: methane_crossover_valve.command
+  - alias: METHANE_CROSSOVER_MDOT_ERROR
+    source: controller.methane_crossover_mdot_p.error
+    units: kg/s
+  - alias: METHANE_CROSSOVER_VALVE_POSITION
+    source: methane_crossover_valve.position
+  - alias: LOX_CROSSOVER_VALVE_COMMAND
+    source: lox_crossover_valve.command
+  - alias: LOX_CROSSOVER_OF_ERROR
+    source: controller.lox_crossover_of_p.error
+  - alias: LOX_CROSSOVER_VALVE_POSITION
+    source: lox_crossover_valve.position
+  - alias: MAIN_LOX_VALVE_POSITION
+    source: main_lox_valve.position
+  - alias: MAIN_METHANE_VALVE_POSITION
+    source: main_methane_valve.position
+  - alias: LOX_SHAFT_RPM
+    source: lox_shaft.rpm
+    units: rpm
+  - alias: METHANE_SHAFT_RPM
+    source: methane_shaft.rpm
+    units: rpm
+  - alias: PC
+    source: chamber.P
+    units: bar
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+exports:
+  csv: true
+  plot: true
+plots:
+  - title: Target Tracking
+    x: TIME
+    y: [TARGET_MDOT_TOTAL, MDOT_TOTAL]
+    ylabel: Mass flow [kg/s]
+  - title: Mixture Ratio
+    x: TIME
+    y: [TARGET_OF, OF]
+    ylabel: OF [-]
+  - title: Mass Flow Rates
+    x: TIME
+    y: [MDOT_METHANE, MDOT_LOX]
+    ylabel: Mass flow [kg/s]
+  - title: Controlled Valve Positions
+    x: TIME
+    y: [METHANE_CROSSOVER_VALVE_POSITION, LOX_CROSSOVER_VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Shaft Speed Response
+    x: TIME
+    y: [LOX_SHAFT_RPM, METHANE_SHAFT_RPM]
+    ylabel: Speed [rpm]

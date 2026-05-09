@@ -1,0 +1,13 @@
+name: tca_mdot_controller
+controllers:
+  lox_valve_mdot_p:
+    type: proportional
+    inputs:
+      target: targets.mdot_total
+      measurement: measurements.mdot_total
+    output: lox_valve.command
+    parameters:
+      feed_forward_gain: 0.008
+      gain: 0.105
+      lower_limit: 0.0
+      upper_limit: 1.0

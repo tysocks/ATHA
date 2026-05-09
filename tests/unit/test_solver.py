@@ -2,6 +2,7 @@
 """Unit tests for steady-state and transient solvers."""
 import numpy as np
 import pytest
+from atha.network import NetworkProblem, NetworkResidual, NetworkSolveError, NetworkStructureError, NetworkVariable, WarmStart
 from atha.thermo.ideal_gas import IdealGasBackend
 from atha.components.volume import Volume
 from atha.core.component import BaseComponent
@@ -209,3 +210,68 @@ def test_transient_solves_square_algebraic_system_inside_rhs():
 
     y = result.get("block", "y")
     assert abs(y[-1] - 0.5) < 5e-3
+
+
+def test_network_problem_solves_named_scaled_residuals_with_warm_start():
+    problem = NetworkProblem(
+        variables=[NetworkVariable("node.P", units="Pa", scale=1.0e6, initial=1.0e5)],
+        residuals=[NetworkResidual("node.P_balance", units="Pa", scale=1.0e6)],
+        evaluator=lambda _t, z, inputs: {"node.P_balance": z["node.P"] - inputs["target.P"]},
+        name="unit_pressure_node",
+    )
+    warm_start = WarmStart.from_problem(problem)
+
+    first = problem.solve(0.0, warm_start, {"target.P": 2.0e6})
+    second = problem.solve(0.1, warm_start, {"target.P": 3.0e6})
+
+    assert first.success
+    assert second.success
+    assert first.values["node.P"] == pytest.approx(2.0e6)
+    assert second.values["node.P"] == pytest.approx(3.0e6)
+    assert warm_start.z[0] == pytest.approx(3.0e6)
+    assert second.max_normalized_residual[1] < 1.0e-10
+
+
+def test_network_problem_rejects_non_square_systems():
+    with pytest.raises(NetworkStructureError, match="must be square"):
+        NetworkProblem(
+            variables=[NetworkVariable("a"), NetworkVariable("b")],
+            residuals=[NetworkResidual("a_balance")],
+            evaluator=lambda _t, _z, _inputs: {"a_balance": 0.0},
+            name="bad",
+        )
+
+
+def test_network_problem_reports_missing_and_extra_residuals():
+    problem = NetworkProblem(
+        variables=[NetworkVariable("a")],
+        residuals=[NetworkResidual("a_balance")],
+        evaluator=lambda _t, _z, _inputs: {"other_balance": 0.0},
+        name="bad_evaluator",
+    )
+
+    with pytest.raises(NetworkStructureError, match="missing=\\['a_balance'\\]"):
+        problem.residual_vector(0.0, np.array([0.0]), {})
+
+
+def test_network_problem_trim_and_checked_solve_report_diagnostics():
+    problem = NetworkProblem(
+        variables=[NetworkVariable("z", scale=1.0, initial=0.0)],
+        residuals=[NetworkResidual("balance", scale=1.0)],
+        evaluator=lambda _t, z, _inputs: {"balance": z["z"] - 2.0},
+        name="trim_unit",
+    )
+
+    solution = problem.trim({})
+
+    assert solution.values["z"] == pytest.approx(2.0)
+
+    bad_problem = NetworkProblem(
+        variables=[NetworkVariable("z", scale=1.0, initial=0.0)],
+        residuals=[NetworkResidual("balance", scale=1.0)],
+        evaluator=lambda _t, _z, _inputs: {"balance": 1.0},
+        name="bad_trim",
+    )
+
+    with pytest.raises(NetworkSolveError, match="largest residual balance"):
+        bad_problem.solve_checked(0.0, None, {}, residual_tolerance=1.0e-12)

@@ -32,3 +32,20 @@ channels:
 exports:
   csv: true
   plot: true
+plots:
+  - title: Valve Actual Response
+    x: TIME
+    y: [METHANE_VALVE_POSITION, LOX_VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Injector Flow
+    x: TIME
+    y: [MDOT_METHANE, MDOT_LOX]
+    ylabel: Mass flow [kg/s]
+  - title: Chamber Pressure And OF
+    x: TIME
+    y: [PC, OF]
+    ylabel: Pc [bar] / OF [-]
+  - title: Nozzle Thrust
+    x: TIME
+    y: [THRUST]
+    ylabel: Thrust [N]

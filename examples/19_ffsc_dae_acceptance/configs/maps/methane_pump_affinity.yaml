@@ -1,0 +1,17 @@
+name: methane_pump_affinity
+kind: structured_grid
+source:
+  type: csv
+  path: methane_pump_affinity.csv
+axes:
+  - name: speed_ratio
+    column: speed_ratio
+  - name: flow_ratio
+    column: flow_ratio
+outputs:
+  - name: pressure_rise
+    column: pressure_rise
+  - name: efficiency
+    column: efficiency
+interpolation:
+  method: linear

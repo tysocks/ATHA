@@ -5,6 +5,7 @@ from typing import Any, Mapping
 from atha.components.combustion_chamber import CombustionChamber
 from atha.components.injector import MassFlowInjector
 from atha.components.nozzle import Nozzle
+from atha.components.registry import known_component_types
 from atha.components.valve import Valve
 from atha.config.schema import ComponentConfig, ConfigError
 from atha.jannaf.efficiency import JANNAFEfficiencies
@@ -39,7 +40,7 @@ def build_component_from_config(config: ComponentConfig, context: Mapping[str, A
         if efficiencies is not None:
             params["efficiencies"] = JANNAFEfficiencies(**efficiencies)
         return Nozzle(config.name, **params)
-    raise ConfigError(f"Unsupported component type for factory construction: {ctype}")
+    raise ConfigError(f"Unsupported component type for factory construction: {ctype}. Known types: {known_component_types()}")
 
 
 def _coerce_numbers(value: Any) -> Any:

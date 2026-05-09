@@ -101,6 +101,56 @@ def evaluate_schedule(schedule: Any, t: float, base_path: Path | None = None) ->
     raise ConfigError(f"Unknown schedule type: {stype}")
 
 
+def schedule_breakpoints(schedule: Any, base_path: Path | None = None) -> list[float]:
+    """Return known discontinuity or corner times for a schedule.
+
+    The solver driver uses these times to split integrations cleanly instead of
+    allowing a stiff integrator to step across commanded events.
+    """
+
+    if not isinstance(schedule, Mapping):
+        return []
+    stype = str(schedule.get("type", "constant"))
+    if stype == "constant":
+        return []
+    if stype == "step":
+        return [float(schedule.get("time", 0.0))]
+    if stype == "ramp":
+        return [float(schedule["t_start"]), float(schedule["t_end"])]
+    if stype == "table":
+        values = schedule.get("values", [])
+        return [float(row[0]) for row in values]
+    if stype == "profile":
+        rows = _load_profile_rows(schedule, base_path)
+        time_column = str(schedule.get("time_column", "time_s"))
+        return [float(row[time_column]) for row in rows if time_column in row]
+    if stype == "runbox":
+        setpoint = _load_runbox_setpoint(schedule.get("setpoint", {}), base_path)
+        bounds = schedule.get("bounds", {})
+        _ = (setpoint, bounds)
+        n = int(schedule.get("points_per_side", 8))
+        dwell_s = float(schedule.get("dwell_s", 0.25))
+        if n < 2 or dwell_s <= 0.0:
+            return []
+        count = 4 * n - 2
+        return [i * dwell_s for i in range(count + 1)]
+    return []
+
+
+def collect_config_breakpoints(*configs: Any, t_start: float, t_end: float) -> list[float]:
+    """Collect schedule breakpoints from boundary, timing, and target configs."""
+
+    points = {float(t_start), float(t_end)}
+    for config in configs:
+        if config is None:
+            continue
+        for schedule in _iter_config_schedules(config):
+            for point in schedule_breakpoints(schedule, base_path=getattr(config, "path", None)):
+                if t_start <= point <= t_end:
+                    points.add(float(point))
+    return sorted(points)
+
+
 def _evaluate_value_or_schedule(spec: Any, t: float, label: str) -> Any:
     if isinstance(spec, Mapping):
         if "schedule" in spec:
@@ -111,6 +161,32 @@ def _evaluate_value_or_schedule(spec: Any, t: float, label: str) -> Any:
             return evaluate_schedule(spec, t)
         raise ConfigError(f"{label} must contain value or schedule")
     return spec
+
+
+def _iter_config_schedules(config: Any):
+    if hasattr(config, "conditions"):
+        for spec in config.conditions.values():
+            yield from _iter_schedules(spec)
+    if hasattr(config, "targets"):
+        for spec in config.targets.values():
+            yield from _iter_schedules(spec)
+    if hasattr(config, "events"):
+        for event in config.events:
+            yield from _iter_schedules(event)
+
+
+def _iter_schedules(value: Any):
+    if isinstance(value, Mapping):
+        if "schedule" in value:
+            yield value["schedule"]
+        elif "type" in value:
+            yield value
+        for nested in value.values():
+            if isinstance(nested, (Mapping, list)):
+                yield from _iter_schedules(nested)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_schedules(item)
 
 
 def _evaluate_runbox(schedule: Mapping[str, Any], t: float, base_path: Path | None = None) -> Dict[str, float]:

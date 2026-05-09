@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from atha.examples.valve_volume import run_valve_volume_profile
+from atha.runner import run_config_folder
 
 
-CONFIG_PATH = Path(__file__).parent / "configs" / "analysis.yaml"
+CONFIG_PATH = Path(__file__).parent / "configs"
 
 
 def main():
-    result = run_valve_volume_profile(CONFIG_PATH)
+    result = run_config_folder(CONFIG_PATH).require_summary()
     print("\nValve-volume transient")
     print(f"  Valve actual    : {result.valve_position.min():.3f}-{result.valve_position.max():.3f}")
     print(f"  Pressure range  : {result.pressure.min() / 1e5:.3f}-{result.pressure.max() / 1e5:.3f} bar")

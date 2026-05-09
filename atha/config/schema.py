@@ -23,6 +23,12 @@ def _list(value: Any, label: str) -> List[Any]:
     return value
 
 
+def _reject_unknown_keys(data: Mapping[str, Any], allowed: set[str], label: str) -> None:
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise ConfigError(f"{label} has unsupported key(s): {unknown}. Allowed: {sorted(allowed)}")
+
+
 @dataclass(frozen=True)
 class MapBindingConfig:
     """Bind a component map slot to a logical map reference.
@@ -41,6 +47,7 @@ class MapBindingConfig:
         if isinstance(value, str):
             return cls(ref=value)
         data = _mapping(value, label)
+        _reject_unknown_keys(data, {"ref", "output", "outputs"}, label)
         ref = data.get("ref")
         if not isinstance(ref, str) or not ref:
             raise ConfigError(f"{label}.ref must be a non-empty string")
@@ -66,6 +73,11 @@ class ComponentConfig:
     @classmethod
     def from_yaml(cls, name: str, value: Any) -> "ComponentConfig":
         data = _mapping(value, f"components.{name}")
+        _reject_unknown_keys(
+            data,
+            {"type", "parameters", "maps", "transient", "initial_state", "metadata"},
+            f"components.{name}",
+        )
         ctype = data.get("type")
         if not isinstance(ctype, str) or not ctype:
             raise ConfigError(f"components.{name}.type must be a non-empty string")
@@ -100,6 +112,7 @@ class ConnectionConfig:
     @classmethod
     def from_yaml(cls, value: Any, index: int) -> "ConnectionConfig":
         data = _mapping(value, f"connections[{index}]")
+        required = {"from", "to", "domain"}
         source = data.get("from")
         target = data.get("to")
         domain = data.get("domain", "fluid")
@@ -109,7 +122,7 @@ class ConnectionConfig:
             raise ConfigError(f"connections[{index}].to must be 'component.port'")
         if domain not in {"fluid", "shaft", "thermal"}:
             raise ConfigError(f"connections[{index}].domain must be fluid, shaft, or thermal")
-        return cls(source=source, target=target, domain=str(domain), metadata={k: v for k, v in data.items() if k not in {"from", "to", "domain"}})
+        return cls(source=source, target=target, domain=str(domain), metadata={k: v for k, v in data.items() if k not in required})
 
 
 @dataclass(frozen=True)
@@ -123,6 +136,7 @@ class EngineConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "EngineConfig":
+        _reject_unknown_keys(data, {"name", "components", "connections", "units", "version"}, "engine")
         name = data.get("name")
         if not isinstance(name, str) or not name:
             raise ConfigError("engine.name must be a non-empty string")
@@ -155,6 +169,11 @@ class MapConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "MapConfig":
+        _reject_unknown_keys(
+            data,
+            {"name", "kind", "source", "axes", "outputs", "interpolation", "scaling"},
+            "map",
+        )
         name = data.get("name")
         if not isinstance(name, str) or not name:
             raise ConfigError("map.name must be a non-empty string")
@@ -186,6 +205,11 @@ class TransientConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "TransientConfig":
+        _reject_unknown_keys(
+            data,
+            {"name", "type", "state", "command", "parameters", "input", "output", "initial"},
+            "transient",
+        )
         name = data.get("name")
         if not isinstance(name, str) or not name:
             raise ConfigError("transient.name must be a non-empty string")
@@ -218,6 +242,7 @@ class BoundaryConditionsConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "BoundaryConditionsConfig":
+        _reject_unknown_keys(data, {"name", "conditions", "time_unit"}, "boundary_conditions")
         return cls(
             name=str(data.get("name", path.stem if path else "boundary_conditions")),
             conditions=dict(_mapping(data.get("conditions", {}), "boundary_conditions.conditions")),
@@ -234,6 +259,7 @@ class OperatingConditionsConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "OperatingConditionsConfig":
+        _reject_unknown_keys(data, {"name", "targets"}, "operating_conditions")
         return cls(
             name=str(data.get("name", path.stem if path else "operating_conditions")),
             targets=dict(_mapping(data.get("targets", {}), "operating_conditions.targets")),
@@ -249,6 +275,7 @@ class TimingConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "TimingConfig":
+        _reject_unknown_keys(data, {"name", "events"}, "timings")
         return cls(
             name=str(data.get("name", path.stem if path else "timings")),
             events=[dict(_mapping(v, f"timings.events[{i}]")) for i, v in enumerate(_list(data.get("events"), "timings.events"))],
@@ -264,6 +291,7 @@ class ControllerConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "ControllerConfig":
+        _reject_unknown_keys(data, {"name", "controllers"}, "controllers")
         return cls(
             name=str(data.get("name", path.stem if path else "controllers")),
             controllers=dict(_mapping(data.get("controllers", {}), "controllers.controllers")),
@@ -277,16 +305,19 @@ class TelemetryConfig:
     channels: List[Dict[str, Any]]
     sample_rate_hz: Optional[float] = None
     exports: Dict[str, Any] = field(default_factory=dict)
+    plots: List[Dict[str, Any]] = field(default_factory=list)
     path: Optional[Path] = None
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "TelemetryConfig":
+        _reject_unknown_keys(data, {"name", "channels", "sample_rate_hz", "exports", "plots"}, "telemetry")
         rate = data.get("sample_rate_hz")
         return cls(
             name=str(data.get("name", path.stem if path else "telemetry")),
             channels=[dict(_mapping(v, f"telemetry.channels[{i}]")) for i, v in enumerate(_list(data.get("channels"), "telemetry.channels"))],
             sample_rate_hz=float(rate) if rate is not None else None,
             exports=dict(_mapping(data.get("exports", {}), "telemetry.exports")),
+            plots=[dict(_mapping(v, f"telemetry.plots[{i}]")) for i, v in enumerate(_list(data.get("plots"), "telemetry.plots"))],
             path=path,
         )
 
@@ -308,6 +339,23 @@ class AnalysisConfig:
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "AnalysisConfig":
+        _reject_unknown_keys(
+            data,
+            {
+                "name",
+                "engine",
+                "maps",
+                "transients",
+                "boundary_conditions",
+                "operating_conditions",
+                "timings",
+                "controllers",
+                "telemetry",
+                "solver",
+                "analysis",
+            },
+            "analysis",
+        )
         name = data.get("name")
         engine = data.get("engine")
         if not isinstance(name, str) or not name:

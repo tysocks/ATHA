@@ -1,0 +1,69 @@
+name: tca_mdot_controller
+components:
+  methane_valve:
+    type: Valve
+    transient: methane_valve_linear
+    parameters:
+      max_area: 2.8e-4
+      discharge_coeff: 1.0
+  methane_pipe:
+    type: Pipe
+    parameters:
+      length: 0.5
+      diameter: 0.010
+      time_constant: 0.28
+  methane_injector:
+    type: MassFlowInjector
+    parameters:
+      delta_P_nominal: 8.0e5
+  lox_valve:
+    type: Valve
+    transient: lox_valve_first_order
+    parameters:
+      max_area: 4.6e-4
+      discharge_coeff: 1.0
+  lox_pipe:
+    type: Pipe
+    parameters:
+      length: 0.4
+      diameter: 0.012
+      time_constant: 0.18
+  lox_injector:
+    type: MassFlowInjector
+    parameters:
+      delta_P_nominal: 1.0e6
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 0.08
+      gas_T: 3500.0
+      gas_R: 420.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 2.11e-2
+      exit_area: 2.11e-1
+      conductance: 1.02e-5
+      thrust_coefficient: 1.45
+connections:
+  - from: methane_valve.outlet
+    to: methane_pipe.inlet
+    domain: fluid
+  - from: methane_pipe.outlet
+    to: methane_injector.inlet
+    domain: fluid
+  - from: methane_injector.outlet
+    to: chamber.fuel_inlet
+    domain: fluid
+  - from: lox_valve.outlet
+    to: lox_pipe.inlet
+    domain: fluid
+  - from: lox_pipe.outlet
+    to: lox_injector.inlet
+    domain: fluid
+  - from: lox_injector.outlet
+    to: chamber.ox_inlet
+    domain: fluid
+  - from: chamber.outlet
+    to: nozzle.inlet
+    domain: fluid

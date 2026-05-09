@@ -1,0 +1,57 @@
+name: tca_mdot_controller_telemetry
+sample_rate_hz: 100
+channels:
+  - alias: TIME
+    source: time
+    units: s
+  - alias: TARGET_MDOT_TOTAL
+    source: target.mdot_total
+    units: kg/s
+  - alias: MDOT_TOTAL
+    source: mdot.total
+    units: kg/s
+  - alias: METHANE_VALVE_COMMAND
+    source: methane_valve.command
+  - alias: METHANE_VALVE_POSITION
+    source: methane_valve.position
+  - alias: LOX_VALVE_COMMAND
+    source: lox_valve.command
+  - alias: LOX_CONTROLLER_ERROR
+    source: controller.lox_valve_mdot_p.error
+    units: kg/s
+  - alias: LOX_VALVE_POSITION
+    source: lox_valve.position
+  - alias: MDOT_METHANE
+    source: methane_pipe.mdot
+    units: kg/s
+  - alias: MDOT_LOX
+    source: lox_pipe.mdot
+    units: kg/s
+  - alias: OF
+    source: chamber.OF
+  - alias: PC
+    source: chamber.P
+    units: bar
+  - alias: THRUST
+    source: nozzle.thrust
+    units: N
+exports:
+  csv: true
+  plot: true
+plots:
+  - title: Total Mass Flow Tracking
+    x: TIME
+    y: [TARGET_MDOT_TOTAL, MDOT_TOTAL]
+    ylabel: Mass flow [kg/s]
+  - title: Valve Actual Response
+    x: TIME
+    y: [METHANE_VALVE_POSITION, LOX_VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Injector Flow
+    x: TIME
+    y: [MDOT_METHANE, MDOT_LOX]
+    ylabel: Mass flow [kg/s]
+  - title: Chamber Pressure And Thrust
+    x: TIME
+    y: [PC, THRUST]
+    ylabel: Pc [bar] / Thrust [N]

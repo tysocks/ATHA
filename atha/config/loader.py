@@ -57,8 +57,11 @@ def load_analysis_config(path: str | Path) -> LoadedAnalysisConfig:
     transients = _load_transients(analysis.transients, analysis_path)
 
     _validate_engine_references(engine, maps, transients)
+    from atha.components.registry import validate_engine_config
 
-    return LoadedAnalysisConfig(
+    validate_engine_config(engine, transients)
+
+    loaded = LoadedAnalysisConfig(
         analysis_config=analysis,
         engine=engine,
         maps=maps,
@@ -69,6 +72,18 @@ def load_analysis_config(path: str | Path) -> LoadedAnalysisConfig:
         controllers=_load_optional_ref(analysis.controllers, analysis_path, ControllerConfig.from_yaml),
         telemetry=_load_optional_ref(analysis.telemetry, analysis_path, TelemetryConfig.from_yaml),
     )
+    _validate_timing_targets(loaded.timings)
+    _validate_controller_outputs(loaded.controllers, transients)
+    return loaded
+
+
+def load_config_folder(path: str | Path) -> LoadedAnalysisConfig:
+    """Load a config folder by resolving ``analysis.yaml`` inside it."""
+
+    candidate = Path(path).expanduser()
+    if candidate.is_dir():
+        candidate = candidate / "analysis.yaml"
+    return load_analysis_config(candidate)
 
 
 def _read_yaml_mapping(path: Path) -> Mapping[str, Any]:
@@ -165,3 +180,71 @@ def _validate_engine_references(
                     f"output(s) {missing} from map '{binding.ref}'. Available: "
                     f"{sorted(available_outputs)}"
                 )
+
+
+def _validate_timing_targets(timings: Optional[TimingConfig]) -> None:
+    if timings is None:
+        return
+    for index, event in enumerate(timings.events):
+        target = event.get("target")
+        if not isinstance(target, str) or not target:
+            raise ConfigError(f"timings.events[{index}].target must be a non-empty string")
+        if "schedule" not in event and "value" not in event:
+            raise ConfigError(f"timings.events[{index}] must contain value or schedule")
+
+
+def _validate_controller_outputs(
+    controllers: Optional[ControllerConfig],
+    transients: Dict[str, TransientConfig],
+) -> None:
+    if controllers is None:
+        return
+    legal_paths = {cfg.command.get("path") for cfg in transients.values() if isinstance(cfg.command.get("path"), str)}
+    from atha.config.controllers import controller_execution_order, controller_output_paths
+
+    try:
+        controller_execution_order(controllers.controllers)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    for name, controller in controllers.controllers.items():
+        if not isinstance(controller, Mapping):
+            raise ConfigError(f"controllers.{name} must be a mapping")
+        controller_type = str(controller.get("type", "null"))
+        outputs = controller_output_paths(controller)
+        for output in outputs:
+            if _is_controller_extension_path(output):
+                continue
+            if output not in legal_paths:
+                raise ConfigError(
+                    f"Controller '{name}' output '{output}' is not a known transient command path. "
+                    f"Known command paths: {sorted(legal_paths)}"
+                )
+        _validate_controller_shape(name, controller_type, controller)
+
+
+def _is_controller_extension_path(path: str) -> bool:
+    return path.startswith("commands.") or path.startswith("controller.") or path.startswith("targets.")
+
+
+def _validate_controller_shape(name: str, controller_type: str, controller: Mapping[str, Any]) -> None:
+    allowed_by_type = {
+        "null": {"type", "input", "output"},
+        "of_mass_flow_split": {"type", "inputs", "outputs"},
+        "gain_product": {"type", "inputs", "output"},
+        "proportional": {"type", "inputs", "output", "parameters"},
+        "pi": {"type", "inputs", "output", "parameters"},
+        "pid": {"type", "inputs", "output", "parameters"},
+        "scheduled_gain": {"type", "inputs", "output"},
+        "limiter": {"type", "input", "output", "parameters"},
+        "rate_limiter": {"type", "input", "output", "parameters"},
+        "selector": {"type", "inputs", "output", "mode", "index"},
+        "min": {"type", "inputs", "output"},
+        "max": {"type", "inputs", "output"},
+        "python_function": {"type", "function", "outputs", "parameters"},
+    }
+    allowed = allowed_by_type.get(controller_type)
+    if allowed is None:
+        raise ConfigError(f"Unsupported controller '{name}' type: {controller_type}")
+    unknown = sorted(set(controller) - allowed)
+    if unknown:
+        raise ConfigError(f"Controller '{name}' has unsupported key(s): {unknown}. Allowed: {sorted(allowed)}")

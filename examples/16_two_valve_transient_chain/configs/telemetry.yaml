@@ -30,3 +30,20 @@ channels:
 exports:
   csv: true
   plot: true
+plots:
+  - title: Valve Actual Response
+    x: TIME
+    y: [VALVE_A_POSITION, VALVE_B_POSITION]
+    ylabel: Position [-]
+  - title: Pipe And Injector Flow
+    x: TIME
+    y: [MDOT_A, MDOT_B]
+    ylabel: Mass flow [kg/s]
+  - title: Chamber Pressure
+    x: TIME
+    y: [PC]
+    ylabel: Pc [bar]
+  - title: Nozzle Thrust
+    x: TIME
+    y: [THRUST]
+    ylabel: Thrust [N]

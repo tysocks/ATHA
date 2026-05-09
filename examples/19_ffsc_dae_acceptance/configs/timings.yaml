@@ -1,0 +1,6 @@
+name: ffsc_dae_acceptance_timings
+events:
+  - target: main_lox_valve.command
+    value: 1.0
+  - target: main_methane_valve.command
+    value: 1.0

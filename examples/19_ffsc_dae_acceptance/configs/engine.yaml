@@ -1,0 +1,334 @@
+name: ffsc_dae_acceptance
+units: SI
+components:
+  lox_shaft:
+    type: Rotor
+    parameters:
+      moment_of_inertia: 0.12
+      initial_speed_rpm: 32000
+      friction_coeff: 0.02
+  methane_shaft:
+    type: Rotor
+    parameters:
+      moment_of_inertia: 0.08
+      initial_speed_rpm: 27000
+      friction_coeff: 0.02
+
+  lox_pump:
+    type: Pump
+    parameters:
+      diameter: 0.145
+      pump_map:
+        model: affinity_law
+        mdot_design: 30.5
+        dP_design: 13.0e6
+        speed_design: 32000
+        efficiency_design: 0.74
+    maps:
+      head_map:
+        ref: lox_pump_affinity
+        output: pressure_rise
+      efficiency_map:
+        ref: lox_pump_affinity
+        output: efficiency
+  methane_pump:
+    type: Pump
+    parameters:
+      diameter: 0.105
+      pump_map:
+        model: affinity_law
+        mdot_design: 9.5
+        dP_design: 13.5e6
+        speed_design: 27000
+        efficiency_design: 0.69
+    maps:
+      head_map:
+        ref: methane_pump_affinity
+        output: pressure_rise
+      efficiency_map:
+        ref: methane_pump_affinity
+        output: efficiency
+
+  lox_pump_discharge_pipe:
+    type: Pipe
+    parameters: {length: 0.45, diameter: 0.055, time_constant: 0.08, friction_factor: 0.018}
+  methane_pump_discharge_pipe:
+    type: Pipe
+    parameters: {length: 0.50, diameter: 0.040, time_constant: 0.10, friction_factor: 0.018}
+  lox_splitter:
+    type: FlowSplitter
+    parameters:
+      split_fraction: 0.92
+  methane_splitter:
+    type: FlowSplitter
+    parameters:
+      split_fraction: 0.90
+
+  lox_to_ox_pb_pipe:
+    type: Pipe
+    parameters: {length: 0.35, diameter: 0.048, time_constant: 0.06}
+  main_lox_valve:
+    type: Valve
+    transient: main_lox_valve
+    parameters: {max_area: 7.5e-4, discharge_coeff: 0.82}
+  lox_pb_valve_to_injector_pipe:
+    type: Pipe
+    parameters: {length: 0.25, diameter: 0.045, time_constant: 0.05}
+  ox_pb_lox_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 1.2e6}
+
+  methane_to_ox_pb_pipe:
+    type: Pipe
+    parameters: {length: 0.65, diameter: 0.018, time_constant: 0.16}
+  methane_crossover_valve:
+    type: Valve
+    transient: methane_crossover_valve
+    parameters: {max_area: 1.0e-4, discharge_coeff: 0.82}
+  methane_ox_pb_valve_to_injector_pipe:
+    type: Pipe
+    parameters: {length: 0.25, diameter: 0.016, time_constant: 0.08}
+  ox_pb_methane_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 0.8e6}
+
+  methane_to_fuel_pb_pipe:
+    type: Pipe
+    parameters: {length: 0.35, diameter: 0.034, time_constant: 0.07}
+  main_methane_valve:
+    type: Valve
+    transient: main_methane_valve
+    parameters: {max_area: 3.2e-4, discharge_coeff: 0.82}
+  methane_pb_valve_to_injector_pipe:
+    type: Pipe
+    parameters: {length: 0.25, diameter: 0.032, time_constant: 0.05}
+  fuel_pb_methane_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 0.9e6}
+
+  lox_to_fuel_pb_pipe:
+    type: Pipe
+    parameters: {length: 0.65, diameter: 0.020, time_constant: 0.14}
+  lox_crossover_valve:
+    type: Valve
+    transient: lox_crossover_valve
+    parameters: {max_area: 1.6e-4, discharge_coeff: 0.82}
+  lox_fuel_pb_valve_to_injector_pipe:
+    type: Pipe
+    parameters: {length: 0.25, diameter: 0.018, time_constant: 0.08}
+  fuel_pb_lox_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 1.0e6}
+
+  ox_preburner:
+    type: Preburner
+    parameters:
+      volume: 7.5e-4
+      design_MR: 65.0
+      efficiency: 0.94
+      initial_P: 8.0e6
+      initial_T: 820.0
+      gas_R: 420.0
+      T_adiabatic: 950.0
+  fuel_preburner:
+    type: Preburner
+    parameters:
+      volume: 7.5e-4
+      design_MR: 0.18
+      efficiency: 0.94
+      initial_P: 8.0e6
+      initial_T: 760.0
+      gas_R: 420.0
+      T_adiabatic: 900.0
+
+  ox_pb_to_turbine_pipe:
+    type: Pipe
+    parameters: {length: 0.30, diameter: 0.050, time_constant: 0.05}
+  lox_turbine:
+    type: Turbine
+    parameters:
+      diameter: 0.115
+      turbine_map:
+        model: affinity_law
+        PR_design: 2.15
+        eta_design: 0.74
+        mdot_corrected_design: 1.0
+    maps:
+      pressure_ratio_map:
+        ref: lox_turbine_affinity
+        output: pressure_ratio
+      efficiency_map:
+        ref: lox_turbine_affinity
+        output: efficiency
+  ox_turbine_to_chamber_pipe:
+    type: Pipe
+    parameters: {length: 0.55, diameter: 0.055, time_constant: 0.10}
+  main_lox_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 1.3e6}
+
+  fuel_pb_to_turbine_pipe:
+    type: Pipe
+    parameters: {length: 0.30, diameter: 0.038, time_constant: 0.05}
+  methane_turbine:
+    type: Turbine
+    parameters:
+      diameter: 0.095
+      turbine_map:
+        model: affinity_law
+        PR_design: 2.00
+        eta_design: 0.72
+        mdot_corrected_design: 1.0
+    maps:
+      pressure_ratio_map:
+        ref: methane_turbine_affinity
+        output: pressure_ratio
+      efficiency_map:
+        ref: methane_turbine_affinity
+        output: efficiency
+  fuel_turbine_to_chamber_pipe:
+    type: Pipe
+    parameters: {length: 0.55, diameter: 0.040, time_constant: 0.10}
+  main_methane_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 1.0e6}
+
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 0.08
+      efficiency: 0.97
+      initial_P: 5.0e6
+      initial_T: 3500.0
+      gas_R: 420.0
+      T_adiabatic: 3600.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 2.11e-2
+      exit_area: 2.11e-1
+      conductance: 1.02e-5
+      thrust_coefficient: 1.45
+
+connections:
+  - from: lox_pump.outlet
+    to: lox_pump_discharge_pipe.inlet
+    domain: fluid
+  - from: lox_pump_discharge_pipe.outlet
+    to: lox_splitter.inlet
+    domain: fluid
+  - from: lox_splitter.outlet_a
+    to: lox_to_ox_pb_pipe.inlet
+    domain: fluid
+  - from: lox_to_ox_pb_pipe.outlet
+    to: main_lox_valve.inlet
+    domain: fluid
+  - from: main_lox_valve.outlet
+    to: lox_pb_valve_to_injector_pipe.inlet
+    domain: fluid
+  - from: lox_pb_valve_to_injector_pipe.outlet
+    to: ox_pb_lox_injector.inlet
+    domain: fluid
+  - from: ox_pb_lox_injector.outlet
+    to: ox_preburner.ox_inlet
+    domain: fluid
+  - from: lox_splitter.outlet_b
+    to: lox_to_fuel_pb_pipe.inlet
+    domain: fluid
+  - from: lox_to_fuel_pb_pipe.outlet
+    to: lox_crossover_valve.inlet
+    domain: fluid
+  - from: lox_crossover_valve.outlet
+    to: lox_fuel_pb_valve_to_injector_pipe.inlet
+    domain: fluid
+  - from: lox_fuel_pb_valve_to_injector_pipe.outlet
+    to: fuel_pb_lox_injector.inlet
+    domain: fluid
+  - from: fuel_pb_lox_injector.outlet
+    to: fuel_preburner.ox_inlet
+    domain: fluid
+
+  - from: methane_pump.outlet
+    to: methane_pump_discharge_pipe.inlet
+    domain: fluid
+  - from: methane_pump_discharge_pipe.outlet
+    to: methane_splitter.inlet
+    domain: fluid
+  - from: methane_splitter.outlet_a
+    to: methane_to_fuel_pb_pipe.inlet
+    domain: fluid
+  - from: methane_to_fuel_pb_pipe.outlet
+    to: main_methane_valve.inlet
+    domain: fluid
+  - from: main_methane_valve.outlet
+    to: methane_pb_valve_to_injector_pipe.inlet
+    domain: fluid
+  - from: methane_pb_valve_to_injector_pipe.outlet
+    to: fuel_pb_methane_injector.inlet
+    domain: fluid
+  - from: fuel_pb_methane_injector.outlet
+    to: fuel_preburner.fuel_inlet
+    domain: fluid
+  - from: methane_splitter.outlet_b
+    to: methane_to_ox_pb_pipe.inlet
+    domain: fluid
+  - from: methane_to_ox_pb_pipe.outlet
+    to: methane_crossover_valve.inlet
+    domain: fluid
+  - from: methane_crossover_valve.outlet
+    to: methane_ox_pb_valve_to_injector_pipe.inlet
+    domain: fluid
+  - from: methane_ox_pb_valve_to_injector_pipe.outlet
+    to: ox_pb_methane_injector.inlet
+    domain: fluid
+  - from: ox_pb_methane_injector.outlet
+    to: ox_preburner.fuel_inlet
+    domain: fluid
+
+  - from: ox_preburner.outlet
+    to: ox_pb_to_turbine_pipe.inlet
+    domain: fluid
+  - from: ox_pb_to_turbine_pipe.outlet
+    to: lox_turbine.inlet
+    domain: fluid
+  - from: lox_turbine.outlet
+    to: ox_turbine_to_chamber_pipe.inlet
+    domain: fluid
+  - from: ox_turbine_to_chamber_pipe.outlet
+    to: main_lox_injector.inlet
+    domain: fluid
+  - from: main_lox_injector.outlet
+    to: chamber.ox_inlet
+    domain: fluid
+
+  - from: fuel_preburner.outlet
+    to: fuel_pb_to_turbine_pipe.inlet
+    domain: fluid
+  - from: fuel_pb_to_turbine_pipe.outlet
+    to: methane_turbine.inlet
+    domain: fluid
+  - from: methane_turbine.outlet
+    to: fuel_turbine_to_chamber_pipe.inlet
+    domain: fluid
+  - from: fuel_turbine_to_chamber_pipe.outlet
+    to: main_methane_injector.inlet
+    domain: fluid
+  - from: main_methane_injector.outlet
+    to: chamber.fuel_inlet
+    domain: fluid
+
+  - from: chamber.outlet
+    to: nozzle.inlet
+    domain: fluid
+  - from: lox_turbine.shaft
+    to: lox_shaft.turbine_in
+    domain: shaft
+  - from: lox_pump.shaft
+    to: lox_shaft.pump
+    domain: shaft
+  - from: methane_turbine.shaft
+    to: methane_shaft.turbine_in
+    domain: shaft
+  - from: methane_pump.shaft
+    to: methane_shaft.pump
+    domain: shaft

@@ -51,6 +51,16 @@ class TransientBlock:
             return 1
         raise ConfigError(f"Unsupported transient type '{self.type}' for '{self.name}'")
 
+    @property
+    def state_names(self) -> list[str]:
+        if self.type == "table":
+            return []
+        if self.type == "second_order":
+            return [self.output_path, f"{self.output_path}_rate"]
+        if self.type in {"first_order", "linear", "rate_limited"}:
+            return [self.output_path]
+        raise ConfigError(f"Unsupported transient type '{self.type}' for '{self.name}'")
+
     def initial_state(self, command_values: Mapping[str, float] | None = None) -> np.ndarray:
         command_values = command_values or {}
         initial = float(self.config.state.get("initial", self.config.parameters.get("initial", command_values.get(self.command_path, 0.0))))
@@ -158,6 +168,20 @@ class TransientSystem:
             return np.zeros(0)
         return np.concatenate([block.initial_state(command_values) for block in self.blocks])
 
+    def state_names(self) -> list[str]:
+        names: list[str] = []
+        for block in self.blocks:
+            names.extend(block.state_names)
+        return names
+
+    def source_catalog(self) -> set[str]:
+        sources: set[str] = set()
+        for block in self.blocks:
+            sources.add(block.output_path)
+            sources.add(f"{block.name}.output")
+            sources.update(block.state_names)
+        return sources
+
     def evaluate(self, t: float, state: np.ndarray, command_values: Mapping[str, float]) -> Dict[str, float]:
         outputs: Dict[str, float] = {}
         for block in self.blocks:
@@ -167,6 +191,14 @@ class TransientSystem:
             outputs[f"{block.name}.output"] = value
         return outputs
 
+    def sample_sources(self, t: float, state: np.ndarray, command_values: Mapping[str, float]) -> Dict[str, float]:
+        samples = self.evaluate(t, state, command_values)
+        for block in self.blocks:
+            local = state[self._slices[block.name]]
+            for i, name in enumerate(block.state_names):
+                samples[name] = float(local[i])
+        return samples
+
     def derivatives(self, t: float, state: np.ndarray, command_values: Mapping[str, float]) -> np.ndarray:
         if not self.blocks:
             return np.zeros(0)
@@ -175,6 +207,23 @@ class TransientSystem:
             local = state[self._slices[block.name]]
             pieces.append(block.derivative(t, local, command_values))
         return np.concatenate(pieces) if pieces else np.zeros(0)
+
+    def build_layout(self, command_values: Mapping[str, float] | None = None):
+        from atha.components.transient import TransientBlockComponent
+        from atha.core.engine import Engine
+
+        engine = Engine("transient_system")
+        component_names: set[str] = set()
+        for block in self.blocks:
+            component = TransientBlockComponent(block, command_values)
+            if component.name in component_names:
+                raise ConfigError(
+                    f"transient output path '{block.output_path}' maps to duplicate "
+                    f"component name '{component.name}'. Use unique component state prefixes."
+                )
+            component_names.add(component.name)
+            engine.add_component(component)
+        return engine.compile()
 
 
 def _signed_limit(error: float, rate: float) -> float:

@@ -1,8 +1,17 @@
 """YAML configuration schema and loading utilities."""
 
-from atha.config.loader import LoadedAnalysisConfig, load_analysis_config
-from atha.config.controllers import evaluate_controllers
+from atha.config.loader import LoadedAnalysisConfig, load_analysis_config, load_config_folder
+from atha.config.controllers import (
+    ControllerStateInfo,
+    controller_execution_order,
+    controller_input_paths,
+    controller_output_paths,
+    controller_state_infos,
+    evaluate_controllers,
+    evaluate_dynamic_controllers,
+)
 from atha.config.maps import build_performance_map, build_performance_maps
+from atha.config.perturbations import apply_path_overrides, flatten_overrides
 from atha.config.schedules import (
     evaluate_boundary_conditions,
     evaluate_operating_targets,
@@ -33,6 +42,7 @@ __all__ = [
     "ConfigError",
     "ConnectionConfig",
     "ControllerConfig",
+    "ControllerStateInfo",
     "EngineConfig",
     "LoadedAnalysisConfig",
     "MapBindingConfig",
@@ -45,11 +55,19 @@ __all__ = [
     "TransientSystem",
     "SUPPORTED_TRANSIENT_TYPES",
     "load_analysis_config",
+    "load_config_folder",
     "build_performance_map",
     "build_performance_maps",
+    "apply_path_overrides",
+    "controller_execution_order",
+    "controller_input_paths",
+    "controller_output_paths",
+    "controller_state_infos",
     "evaluate_boundary_conditions",
     "evaluate_controllers",
+    "evaluate_dynamic_controllers",
     "evaluate_operating_targets",
     "evaluate_schedule",
     "evaluate_timing_events",
+    "flatten_overrides",
 ]

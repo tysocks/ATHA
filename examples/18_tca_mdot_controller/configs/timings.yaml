@@ -1,0 +1,8 @@
+name: tca_mdot_controller_timings
+events:
+  - target: methane_valve.command
+    schedule:
+      type: step
+      time: 0.0
+      initial: 0.2
+      final: 1.0

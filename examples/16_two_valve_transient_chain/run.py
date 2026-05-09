@@ -6,14 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-from atha.examples.two_valve_chain import run_two_valve_chain
+from atha.runner import run_config_folder
 
 
-CONFIG_PATH = Path(__file__).parent / "configs" / "analysis.yaml"
+CONFIG_PATH = Path(__file__).parent / "configs"
 
 
 def main():
-    result = run_two_valve_chain(CONFIG_PATH)
+    result = run_config_folder(CONFIG_PATH).require_summary()
     print("\nTwo-valve transient chain")
     print(f"  Valve A actual  : {result.valve_a_position.min():.3f}-{result.valve_a_position.max():.3f}")
     print(f"  Valve B actual  : {result.valve_b_position.min():.3f}-{result.valve_b_position.max():.3f}")

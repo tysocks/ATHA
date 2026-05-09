@@ -1,0 +1,17 @@
+name: methane_turbine_affinity
+kind: structured_grid
+source:
+  type: csv
+  path: methane_turbine_affinity.csv
+axes:
+  - name: pressure_ratio
+    column: pressure_ratio
+  - name: corrected_flow_ratio
+    column: corrected_flow_ratio
+outputs:
+  - name: pressure_ratio
+    column: pressure_ratio_out
+  - name: efficiency
+    column: efficiency
+interpolation:
+  method: linear

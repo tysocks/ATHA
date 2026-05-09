@@ -20,3 +20,16 @@ channels:
 exports:
   csv: true
   plot: true
+plots:
+  - title: Valve Command And Position
+    x: TIME
+    y: [VALVE_COMMAND, VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Downstream Pressure
+    x: TIME
+    y: [P_DOWNSTREAM]
+    ylabel: Pressure [bar]
+  - title: Flow Response
+    x: TIME
+    y: [MDOT_IN, MDOT_OUT]
+    ylabel: Mass flow [kg/s]
