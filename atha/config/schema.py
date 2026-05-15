@@ -30,6 +30,26 @@ def _reject_unknown_keys(data: Mapping[str, Any], allowed: set[str], label: str)
 
 
 @dataclass(frozen=True)
+class PhaseConfig:
+    name: str
+    start_s: float
+    end_s: float
+
+    @classmethod
+    def from_yaml(cls, value: Any, label: str) -> "PhaseConfig":
+        data = _mapping(value, label)
+        _reject_unknown_keys(data, {"name", "start_s", "end_s", "start", "end"}, label)
+        name = data.get("name")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"{label}.name must be a non-empty string")
+        start = float(data.get("start_s", data.get("start", 0.0)))
+        end = float(data.get("end_s", data.get("end", start)))
+        if end <= start:
+            raise ConfigError(f"{label}.end_s must be greater than start_s")
+        return cls(name=name, start_s=start, end_s=end)
+
+
+@dataclass(frozen=True)
 class MapBindingConfig:
     """Bind a component map slot to a logical map reference.
 
@@ -287,14 +307,16 @@ class TimingConfig:
 class ControllerConfig:
     name: str
     controllers: Dict[str, Any]
+    evaluation: Dict[str, Any] = field(default_factory=dict)
     path: Optional[Path] = None
 
     @classmethod
     def from_yaml(cls, data: Mapping[str, Any], path: Optional[Path] = None) -> "ControllerConfig":
-        _reject_unknown_keys(data, {"name", "controllers"}, "controllers")
+        _reject_unknown_keys(data, {"name", "controllers", "evaluation"}, "controllers")
         return cls(
             name=str(data.get("name", path.stem if path else "controllers")),
             controllers=dict(_mapping(data.get("controllers", {}), "controllers.controllers")),
+            evaluation=dict(_mapping(data.get("evaluation", {}), "controllers.evaluation")),
             path=path,
         )
 

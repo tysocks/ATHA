@@ -1,0 +1,32 @@
+name: gg_single_shaft_methalox_controller
+evaluation:
+  frequency_hz: 10.0
+controllers:
+  lox_generator_mdot_p:
+    type: pid
+    active_phases: [CLC]
+    inputs:
+      target: targets.mdot_total
+      measurement: measurements.mdot_total
+    output: lox_generator_valve.command
+    parameters:
+      bias: 0.20
+      proportional_gain: 0.2
+      integral_gain: 0.05
+      derivative_gain: 0.0
+      lower_limit: 0.05
+      upper_limit: 1.00
+  methane_generator_of_p:
+    type: pid
+    active_phases: [CLC]
+    inputs:
+      target: targets.OF
+      measurement: measurements.OF
+    output: methane_generator_valve.command
+    parameters:
+      bias: 1
+      proportional_gain: -4
+      integral_gain: 0.2
+      derivative_gain: 0.001
+      lower_limit: 0.05
+      upper_limit: 1.00

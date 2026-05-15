@@ -1,0 +1,10 @@
+name: turbine_affinity
+kind: analytic
+source:
+  type: constant
+  values: {efficiency: 0.72}
+axes:
+  - {name: pressure_ratio}
+  - {name: corrected_flow_ratio}
+outputs:
+  - {name: efficiency}

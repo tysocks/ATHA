@@ -65,6 +65,77 @@ def write_comparison_report_json(path: str | Path, comparisons: list[ChannelComp
     return out_path
 
 
+def load_time_series_csv(path: str | Path, *, time_column: str = "TIME") -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Load a telemetry CSV into a time vector and numeric channel arrays."""
+
+    data = np.genfromtxt(path, delimiter=",", names=True, dtype=float, encoding="utf-8")
+    if data.shape == ():
+        data = np.asarray([data], dtype=data.dtype)
+    names = list(data.dtype.names or [])
+    if time_column not in names:
+        raise ValueError(f"time column {time_column!r} not found in CSV {path}")
+    time = np.asarray(data[time_column], dtype=float)
+    channels = {name: np.asarray(data[name], dtype=float) for name in names if name != time_column}
+    return time, channels
+
+
+def load_time_series_hdf5(path: str | Path, *, time_channel: str = "TIME") -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Load telemetry channels from an ATHA HDF5 telemetry file."""
+
+    try:
+        import h5py
+    except ImportError as exc:
+        raise RuntimeError("h5py is required to load HDF5 telemetry") from exc
+
+    channels: dict[str, np.ndarray] = {}
+    with h5py.File(path, "r") as h5:
+        if "telemetry" not in h5:
+            raise ValueError(f"HDF5 file does not contain a telemetry group: {path}")
+        group = h5["telemetry"]
+        for name, dataset in group.items():
+            channels[str(name)] = np.asarray(dataset, dtype=float)
+    if time_channel not in channels:
+        raise ValueError(f"time channel {time_channel!r} not found in HDF5 {path}")
+    time = channels.pop(time_channel)
+    return time, channels
+
+
+def load_time_series(path: str | Path, *, time_column: str = "TIME") -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Load ATHA CSV or HDF5 telemetry by file suffix."""
+
+    suffix = Path(path).suffix.lower()
+    if suffix == ".csv":
+        return load_time_series_csv(path, time_column=time_column)
+    if suffix in {".h5", ".hdf5"}:
+        return load_time_series_hdf5(path, time_channel=time_column)
+    raise ValueError(f"Unsupported telemetry file type: {suffix}")
+
+
+def compare_time_series_files(
+    reference_path: str | Path,
+    actual_path: str | Path,
+    *,
+    channels: list[str] | None = None,
+    time_column: str = "TIME",
+    settling_tolerance: float | Mapping[str, float] | None = None,
+) -> list[ChannelComparison]:
+    """Compare two ATHA telemetry files using common channels."""
+
+    reference_time, reference = load_time_series(reference_path, time_column=time_column)
+    actual_time, actual = load_time_series(actual_path, time_column=time_column)
+    if channels is not None:
+        selected = set(channels)
+        reference = {name: values for name, values in reference.items() if name in selected}
+        actual = {name: values for name, values in actual.items() if name in selected}
+    return compare_time_series(
+        reference_time,
+        reference,
+        actual_time,
+        actual,
+        settling_tolerance=settling_tolerance,
+    )
+
+
 def _settling_time(
     reference_time: np.ndarray,
     error: np.ndarray,

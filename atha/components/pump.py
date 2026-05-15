@@ -193,7 +193,8 @@ class Pump(BaseComponent):
             ctx = dict(states)
             ctx.update(inputs)
             ctx["delta_P"] = delta_P
-            eta = self._efficiency_map.evaluate(ctx)["efficiency"]
+            efficiency_values = self._efficiency_map.evaluate(ctx)
+            eta = efficiency_values.get("efficiency", efficiency_values.get("eta", self._pump_map.efficiency(mdot, omega)))
         else:
             eta = self._pump_map.efficiency(mdot, omega)
 
@@ -202,16 +203,23 @@ class Pump(BaseComponent):
         total_mdot = abs(mdot) + abs(bleed_mdot)
         W   = total_mdot * delta_P / (rho * max(eta, 1e-6))
         tau = W / max(abs(omega), 1.0)
+        delta_h = delta_P / (rho * max(eta, 1.0e-6))
+        h_out = h_in + delta_h
+        try:
+            _fs_out = self._fluid.state_from_Ph(P_out, h_out)
+            T_out = _fs_out.T
+        except Exception:
+            T_out = T_in + delta_h / 4186.0
 
         return {
             "outlet.P":   P_out,
-            "outlet.h":   h_in,   # no enthalpy rise in ideal pump
-            "outlet.T":   T_in,
+            "outlet.h":   h_out,
+            "outlet.T":   T_out,
             "outlet.rho": rho,
             # Bare keys propagate through any port connection (e.g. bleed ports)
             "P":    P_out,
-            "h":    h_in,
-            "T":    T_in,
+            "h":    h_out,
+            "T":    T_out,
             "rho":  rho,
             "delta_P":    delta_P,
             "inlet.mdot": mdot,

@@ -16,6 +16,7 @@ from atha.config import (
     evaluate_timing_events,
     load_analysis_config,
 )
+from atha.config.controllers import controller_evaluation_period, controller_sample_index
 from atha.examples.common import coerce_numbers
 from atha.analysis.linearization import (
     PerturbationConfig,
@@ -117,6 +118,8 @@ def run_ffsc_dae_transient(
     algebraic_problem = build_ffsc_reduced_algebraic_problem(model)
     z_guess = algebraic_problem.initial_z.copy()
     residual_report: dict[str, float] = {}
+    controller_period_s = controller_evaluation_period(loaded.controllers)
+    controller_cache: dict[int, dict[str, float]] = {}
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         nonlocal z_guess, residual_report
@@ -128,7 +131,7 @@ def run_ffsc_dae_transient(
         z_guess = algebraic.z
         residual_report = algebraic.normalized_residuals
         measurements = _measurements(algebraic.values)
-        commands = _commands(loaded, t, measurements)
+        commands = _commands(loaded, t, measurements, controller_period_s=controller_period_s, controller_cache=controller_cache)
         transient_sources = transient_system.sample_sources(t, x_transient, commands)
         algebraic = _solve_ffsc_algebraic(algebraic_problem, z_guess, t, states, transient_sources, model)
         z_guess = algebraic.z
@@ -201,7 +204,7 @@ def run_ffsc_dae_transient(
         transient_sources = transient_system.sample_sources(float(ti), x_transient, timings)
         algebraic = _solve_ffsc_algebraic(algebraic_problem, z_guess, float(ti), states, transient_sources, model)
         measurements = _measurements(algebraic.values)
-        commands = _commands(loaded, float(ti), measurements)
+        commands = _commands(loaded, float(ti), measurements, controller_period_s=controller_period_s, controller_cache=controller_cache)
         transient_sources = transient_system.sample_sources(float(ti), x_transient, commands)
         algebraic = _solve_ffsc_algebraic(algebraic_problem, z_guess, float(ti), states, transient_sources, model)
         z_guess = algebraic.z
@@ -283,18 +286,20 @@ def run_ffsc_dae_transient(
             output_dir / str(linearization_cfg.get("output", Path(str(run["output"]["csv"])).with_suffix(".linearization.json").name)),
             linearization,
         )
+    acceptance_cfg = run.get("acceptance", {}) if isinstance(run.get("acceptance", {}), dict) else {}
+    acceptance_mask = _acceptance_mask(t, acceptance_cfg)
     acceptance_report = build_ffsc_reduced_acceptance_report(
-        time=t,
-        mdot_total=mdot_total,
-        target_mdot_total=target_mdot_total,
-        of_ratio=of_ratio,
-        target_of=target_of,
-        thrust=thrust,
-        lox_shaft_rpm=lox_rpm,
-        methane_shaft_rpm=methane_rpm,
+        time=t[acceptance_mask],
+        mdot_total=mdot_total[acceptance_mask],
+        target_mdot_total=target_mdot_total[acceptance_mask],
+        of_ratio=of_ratio[acceptance_mask],
+        target_of=target_of[acceptance_mask],
+        thrust=thrust[acceptance_mask],
+        lox_shaft_rpm=lox_rpm[acceptance_mask],
+        methane_shaft_rpm=methane_rpm[acceptance_mask],
         residuals=residual_report,
         linearization_path=linearization_path,
-        tolerances=run.get("acceptance", {}).get("tolerances", {}) if isinstance(run.get("acceptance", {}), dict) else {},
+        tolerances=acceptance_cfg.get("tolerances", {}),
     )
     acceptance_report_path = write_acceptance_report_json(
         output_dir / str(run.get("acceptance", {}).get("report", Path(str(run["output"]["csv"])).with_suffix(".acceptance.json").name))
@@ -440,7 +445,10 @@ def build_ffsc_reduced_algebraic_problem(model: dict[str, float]) -> NetworkProb
         states = inputs["states"]
         transients = inputs.get("transients", {})
         targets = _ffsc_targets(states, transients, model)
-        return {f"{name}_residual": float(z[name] - value) for name, value in targets.items()}
+        return {
+            f"{name}_residual": float(z[name] - targets[name])
+            for name in z
+        }
 
     return NetworkProblem(variables, residuals, evaluate, name="ffsc_reduced_dae")
 
@@ -454,6 +462,7 @@ def _solve_ffsc_algebraic(
     model: dict[str, float],
 ):
     solution = problem.solve(t, z_guess, {"states": states, "transients": transients, "model": model})
+    solution.values.update(_ffsc_targets(states, transients, model))
     name, residual = solution.max_normalized_residual
     if not solution.success or abs(residual) > 1.0e-6:
         raise RuntimeError(
@@ -502,6 +511,10 @@ def _ffsc_targets(states: dict[str, float], transients: dict[str, float], model:
     methane_pump_power = (
         methane_total * model["methane_pump_dp_design"] * methane_speed_ratio**2 / model["methane_pump_efficiency"]
     )
+    lox_pump_dp = model["lox_pump_dp_design"] * lox_speed_ratio**2
+    methane_pump_dp = model["methane_pump_dp_design"] * methane_speed_ratio**2
+    lox_pump_outlet_h = model["lox_pump_inlet_h"] + lox_pump_dp / max(model["lox_pump_rho_design"] * model["lox_pump_efficiency"], 1.0e-12)
+    methane_pump_outlet_h = model["methane_pump_inlet_h"] + methane_pump_dp / max(model["methane_pump_rho_design"] * model["methane_pump_efficiency"], 1.0e-12)
     lox_turbine_power = model["lox_turbine_power_gain"] * ox_pb_out * (1.0 + 0.8 * methane_cross_flow)
     methane_turbine_power = model["methane_turbine_power_gain"] * fuel_pb_out * (1.0 + 0.6 * lox_cross_flow)
     return {
@@ -517,6 +530,12 @@ def _ffsc_targets(states: dict[str, float], transients: dict[str, float], model:
         "fuel_preburner.mdot_out": fuel_pb_out,
         "lox_pump.power": lox_pump_power,
         "methane_pump.power": methane_pump_power,
+        "lox_pump.efficiency": model["lox_pump_efficiency"],
+        "methane_pump.efficiency": model["methane_pump_efficiency"],
+        "lox_pump.inlet.h": model["lox_pump_inlet_h"],
+        "methane_pump.inlet.h": model["methane_pump_inlet_h"],
+        "lox_pump.outlet.h": lox_pump_outlet_h,
+        "methane_pump.outlet.h": methane_pump_outlet_h,
         "lox_turbine.power": lox_turbine_power,
         "methane_turbine.power": methane_turbine_power,
     }
@@ -568,6 +587,10 @@ def _ffsc_design_model(loaded) -> dict[str, float]:
         "methane_pump_dp_design": float(methane_pump.get("dP_design", 13.5e6)),
         "lox_pump_efficiency": float(lox_pump.get("efficiency_design", 0.74)),
         "methane_pump_efficiency": float(methane_pump.get("efficiency_design", 0.69)),
+        "lox_pump_rho_design": float(lox_pump.get("rho_design", boundaries.get("lox_tank.outlet.rho", 1140.0))),
+        "methane_pump_rho_design": float(methane_pump.get("rho_design", boundaries.get("methane_tank.outlet.rho", 422.0))),
+        "lox_pump_inlet_h": float(boundaries.get("lox_tank.outlet.h", 0.0)),
+        "methane_pump_inlet_h": float(boundaries.get("methane_tank.outlet.h", 0.0)),
         "lox_shaft_inertia": float(lox_shaft.get("moment_of_inertia", 0.12)),
         "methane_shaft_inertia": float(methane_shaft.get("moment_of_inertia", 0.08)),
         "lox_shaft_friction": float(lox_shaft.get("friction_coeff", 0.02)),
@@ -629,13 +652,64 @@ def _zero_measurements(run: dict[str, object]) -> dict[str, float]:
     }
 
 
-def _commands(loaded, t: float, measurements: dict[str, float]) -> dict[str, float]:
+def _commands(
+    loaded,
+    t: float,
+    measurements: dict[str, float],
+    *,
+    controller_period_s: float | None = None,
+    controller_cache: dict[int, dict[str, float]] | None = None,
+) -> dict[str, float]:
     targets = coerce_numbers(evaluate_operating_targets(loaded.operating_conditions, t))
     timings = coerce_numbers(evaluate_timing_events(loaded.timings, t))
-    controller_outputs = coerce_numbers(evaluate_dynamic_controllers(loaded.controllers, targets, timings, measurements))
+    sample_index = controller_sample_index(t, controller_period_s)
+    if sample_index is not None and controller_cache is not None and sample_index in controller_cache:
+        controller_outputs = dict(controller_cache[sample_index])
+    else:
+        previous_outputs = (
+            controller_cache.get(sample_index - 1, {})
+            if sample_index is not None and controller_cache is not None
+            else {}
+        )
+        controller_outputs = coerce_numbers(
+            evaluate_dynamic_controllers(
+                loaded.controllers,
+                targets,
+                timings,
+                measurements,
+                dt=controller_period_s or 1.0,
+                current_phase=_current_phase(loaded, t),
+                previous_outputs=previous_outputs,
+            )
+        )
+        if sample_index is not None and controller_cache is not None:
+            controller_cache[sample_index] = dict(controller_outputs)
     commands = dict(timings)
     commands.update(controller_outputs)
-    return commands
+    return _with_transient_command_defaults(loaded, commands)
+
+
+def _with_transient_command_defaults(loaded, commands: dict[str, float]) -> dict[str, float]:
+    completed = dict(commands)
+    for transient in loaded.transients.values():
+        path = transient.command.get("path")
+        if not isinstance(path, str) or path in completed:
+            continue
+        initial = transient.state.get("initial", transient.parameters.get("initial", 0.0))
+        completed[path] = float(initial)
+    return completed
+
+
+def _acceptance_mask(time: np.ndarray, acceptance_cfg: dict[str, object]) -> np.ndarray:
+    if not acceptance_cfg:
+        return np.ones_like(time, dtype=bool)
+    end = acceptance_cfg.get("evaluation_end_s", acceptance_cfg.get("evaluation_time_s"))
+    if end is None:
+        return np.ones_like(time, dtype=bool)
+    mask = time <= float(end)
+    if not np.any(mask):
+        mask[0] = True
+    return mask
 
 
 def _initial_conditions(run: dict[str, object]) -> dict[str, float]:
@@ -643,6 +717,22 @@ def _initial_conditions(run: dict[str, object]) -> dict[str, float]:
     if not isinstance(values, dict):
         return {}
     return {str(key): float(value) for key, value in values.items()}
+
+
+def _current_phase(loaded, t: float) -> str | None:
+    phases = loaded.analysis_config.analysis.get("time", {}).get("phases", [])
+    if not isinstance(phases, list):
+        return None
+    time_end = float(loaded.analysis_config.analysis.get("time", {}).get("end_s", t))
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        name = phase.get("name")
+        start = float(phase.get("start_s", phase.get("start", 0.0)))
+        end = float(phase.get("end_s", phase.get("end", time_end)))
+        if start <= float(t) < end or (float(t) == end and end == time_end):
+            return str(name) if name is not None else None
+    return None
 
 
 def _transient(values: dict[str, float], path: str, default: float) -> float:

@@ -30,7 +30,7 @@ def build_telemetry_rows(config, samples: list[Mapping[str, Any]]) -> tuple[list
         source = str(channel["source"])
         scale = _scale_for_channel(source, channel.get("units"))
         headers.append(alias)
-        columns[alias] = np.asarray([float(sample[source]) * scale for sample in samples], dtype=float)
+        columns[alias] = np.asarray([float(sample.get(source, np.nan)) * scale for sample in samples], dtype=float)
     return headers, columns
 
 

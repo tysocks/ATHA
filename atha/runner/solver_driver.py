@@ -38,6 +38,7 @@ class StateMode:
 class ExecutionPhase:
     start_s: float
     end_s: float
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class SolverDriver:
             analysis_type=analysis_type,
             mode=spec.mode,
             execution_plan=execution_plan,
+            registry=self.registry,
         )
         summary = self.registry.run_context(context)
         if hasattr(summary, "__dict__"):
@@ -87,18 +89,7 @@ class SolverDriver:
         time_cfg = analysis.get("time", {})
         t_start = float(time_cfg.get("start_s", 0.0))
         t_end = float(time_cfg.get("end_s", t_start))
-        breakpoints = collect_config_breakpoints(
-            loaded.boundary_conditions,
-            loaded.timings,
-            loaded.operating_conditions,
-            t_start=t_start,
-            t_end=t_end,
-        )
-        phases = [
-            ExecutionPhase(start_s=breakpoints[i], end_s=breakpoints[i + 1])
-            for i in range(len(breakpoints) - 1)
-            if breakpoints[i + 1] > breakpoints[i]
-        ]
+        phases = _execution_phases(time_cfg, loaded, t_start, t_end)
         return ExecutionPlan(
             analysis_type=analysis_type,
             mode=mode,
@@ -149,3 +140,36 @@ def _state_modes(raw: Any) -> dict[str, StateMode]:
 
 def _optional_float(value: Any) -> float | None:
     return None if value is None else float(value)
+
+
+def _execution_phases(
+    time_cfg: Any,
+    loaded: LoadedAnalysisConfig,
+    t_start: float,
+    t_end: float,
+) -> list[ExecutionPhase]:
+    configured = time_cfg.get("phases", []) if isinstance(time_cfg, dict) else []
+    if isinstance(configured, list) and configured:
+        phases: list[ExecutionPhase] = []
+        for index, phase in enumerate(configured):
+            if not isinstance(phase, dict):
+                raise ValueError("analysis.time.phases entries must be mappings")
+            name = str(phase.get("name", f"phase_{index}"))
+            start = float(phase.get("start_s", phase.get("start", t_start)))
+            end = float(phase.get("end_s", phase.get("end", t_end)))
+            if end <= start:
+                raise ValueError(f"analysis.time.phases[{index}] end_s must be greater than start_s")
+            phases.append(ExecutionPhase(start_s=start, end_s=end, name=name))
+        return phases
+    breakpoints = collect_config_breakpoints(
+        loaded.boundary_conditions,
+        loaded.timings,
+        loaded.operating_conditions,
+        t_start=t_start,
+        t_end=t_end,
+    )
+    return [
+        ExecutionPhase(start_s=breakpoints[i], end_s=breakpoints[i + 1])
+        for i in range(len(breakpoints) - 1)
+        if breakpoints[i + 1] > breakpoints[i]
+    ]

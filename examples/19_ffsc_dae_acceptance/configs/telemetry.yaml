@@ -18,6 +18,22 @@ channels:
   - alias: MDOT_LOX
     source: lox_pump.inlet.mdot
     units: kg/s
+  - alias: LOX_PUMP_EFFICIENCY
+    source: lox_pump.efficiency
+  - alias: LOX_PUMP_INLET_H
+    source: lox_pump.inlet.h
+    units: J/kg
+  - alias: LOX_PUMP_OUTLET_H
+    source: lox_pump.outlet.h
+    units: J/kg
+  - alias: METHANE_PUMP_EFFICIENCY
+    source: methane_pump.efficiency
+  - alias: METHANE_PUMP_INLET_H
+    source: methane_pump.inlet.h
+    units: J/kg
+  - alias: METHANE_PUMP_OUTLET_H
+    source: methane_pump.outlet.h
+    units: J/kg
   - alias: OF
     source: chamber.OF
   - alias: METHANE_CROSSOVER_VALVE_COMMAND
@@ -65,9 +81,13 @@ plots:
     x: TIME
     y: [MDOT_METHANE, MDOT_LOX]
     ylabel: Mass flow [kg/s]
-  - title: Controlled Valve Positions
+  - title: LOx Crossover Valve Control
     x: TIME
-    y: [METHANE_CROSSOVER_VALVE_POSITION, LOX_CROSSOVER_VALVE_POSITION]
+    y: [METHANE_CROSSOVER_VALVE_COMMAND, METHANE_CROSSOVER_VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Methane Crossover Valve Control
+    x: TIME
+    y: [LOX_CROSSOVER_VALVE_COMMAND, LOX_CROSSOVER_VALVE_POSITION]
     ylabel: Position [-]
   - title: Shaft Speed Response
     x: TIME

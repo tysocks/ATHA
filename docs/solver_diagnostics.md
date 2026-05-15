@@ -34,6 +34,25 @@ Common causes:
 - telemetry or controller paths that refer to old component names;
 - map extrapolation outside the intended range.
 
+## Port Network Diagnostics
+
+`analysis.type: port_network_diagnostics` builds the automatic ROCETS-like port
+network directly from `engine.yaml`. It generates fluid, shaft, and thermal
+port variables, adds connection residuals, includes registered component
+residual contracts, and writes a JSON diagnostic artifact.
+
+```yaml
+analysis:
+  type: port_network_diagnostics
+  diagnostics_output: port_network.json
+  solve: true
+```
+
+This mode is useful for topology validation and residual-name inspection. It is
+not yet the full transient DAE solve; incomplete component physics or missing
+boundary/closure equations will appear as large residuals or non-square
+least-squares diagnostics.
+
 ## Telemetry Source Errors
 
 ```text

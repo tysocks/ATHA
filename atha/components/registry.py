@@ -117,7 +117,7 @@ def default_component_registry() -> ComponentRegistry:
             transient_capable=True,
             model_extractor=_extract_valve_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
-            output_paths=("mdot", "A_frac", "position", "command"),
+            output_paths=("mdot", "A_frac", "position", "command", "CdA"),
             map_slots=frozenset({"cd_map", "cda_map"}),
             transient_inputs=("command",),
             residual_contract=residual_contract_for_type("Valve"),
@@ -126,11 +126,14 @@ def default_component_registry() -> ComponentRegistry:
     registry.register(
         ComponentSpec(
             "Pipe",
-            optional_parameters=frozenset({"length", "diameter", "time_constant", "friction_factor"}),
+            optional_parameters=frozenset({"length", "diameter", "time_constant", "friction_factor", "conductance", "mdot_design", "fallback_conductance"}),
             model_extractor=_extract_pipe_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("mdot",),
+            algebraic_variables=("mdot",),
+            residual_names=("momentum_residual",),
             output_paths=("mdot", "mdot_steady", "P", "dP"),
+            residual_contract=residual_contract_for_type("Pipe"),
         )
     )
     registry.register(
@@ -152,7 +155,10 @@ def default_component_registry() -> ComponentRegistry:
             model_extractor=_extract_chamber_model,
             ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
+            algebraic_variables=("P", "OF", "T", "mdot"),
+            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual"),
             output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
+            residual_contract=residual_contract_for_type("CombustionChamber"),
         )
     )
     registry.register(
@@ -246,7 +252,10 @@ def default_component_registry() -> ComponentRegistry:
             allow_extra_parameters=True,
             ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
+            algebraic_variables=("P", "OF", "T", "mdot"),
+            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual"),
             output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
+            residual_contract=residual_contract_for_type("Preburner"),
         )
     )
     registry.register(
@@ -255,7 +264,10 @@ def default_component_registry() -> ComponentRegistry:
             allow_extra_parameters=True,
             ports={"coolant_inlet": "fluid_in", "coolant_outlet": "fluid_out"},
             state_names=("T_wall",),
-            output_paths=("coolant_outlet.P", "coolant_outlet.h", "coolant_outlet.mdot", "Q_cool", "Q_hot", "T_wall"),
+            algebraic_variables=("T_wall", "Q_dot"),
+            residual_names=("heat_balance_residual", "wall_temperature_residual"),
+            output_paths=("coolant_outlet.P", "coolant_outlet.h", "coolant_outlet.mdot", "Q_cool", "Q_hot", "T_wall", "Q_dot"),
+            residual_contract=residual_contract_for_type("RegenChannel"),
         )
     )
     for type_name in ("GasGenerator", "OrificeCompressible"):

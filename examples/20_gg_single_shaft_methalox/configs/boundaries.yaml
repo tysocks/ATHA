@@ -1,0 +1,11 @@
+name: gg_single_shaft_methalox_boundaries
+time_unit: s
+conditions:
+  lox_tank.outlet.P: {value: 4.0e5, units: Pa}
+  lox_tank.outlet.T: {value: 91.0, units: K}
+  lox_tank.outlet.rho: {value: 1140.0, units: kg/m3}
+  methane_tank.outlet.P: {value: 4.0e5, units: Pa}
+  methane_tank.outlet.T: {value: 108.0, units: K}
+  methane_tank.outlet.rho: {value: 420.0, units: kg/m3}
+  nozzle.ambient.P: {value: 101325.0, units: Pa}
+  turbine.ambient.P: {value: 101325.0, units: Pa}

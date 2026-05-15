@@ -18,6 +18,8 @@ class RunArtifacts:
     monte_carlo_file: Path | None = None
     histogram: Path | None = None
     sweep_plot: Path | None = None
+    statistics: Path | None = None
+    sensitivity: Path | None = None
 
     @classmethod
     def from_summary(cls, summary: Any) -> "RunArtifacts":
@@ -33,6 +35,8 @@ class RunArtifacts:
             monte_carlo_file=getattr(summary, "monte_carlo_file", None),
             histogram=getattr(summary, "histogram", None),
             sweep_plot=getattr(summary, "sweep_plot", None),
+            statistics=getattr(summary, "statistics", None),
+            sensitivity=getattr(summary, "sensitivity", None),
         )
 
     def as_dict(self) -> dict[str, Path]:

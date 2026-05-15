@@ -1,0 +1,20 @@
+name: gg_single_shaft_methalox_operating_conditions
+targets:
+  mdot_total:
+    schedule:
+      type: table
+      values:
+        - [0.0, 38.0]
+        - [9.999, 38.0]
+        - [10.0, 30.0]
+        - [19.999, 30.0]
+        - [20.0, 38.0]
+        - [30.0, 38.0]
+  OF:
+    schedule:
+      type: table
+      values:
+        - [0.0, 3.0]
+        - [5.0, 3.0]
+        - [24.999, 3.4]
+        - [30.0, 3.4]

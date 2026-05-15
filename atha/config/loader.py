@@ -86,19 +86,58 @@ def load_config_folder(path: str | Path) -> LoadedAnalysisConfig:
     return load_analysis_config(candidate)
 
 
-def _read_yaml_mapping(path: Path) -> Mapping[str, Any]:
+def _read_yaml_mapping(path: Path, include_stack: tuple[Path, ...] = ()) -> Mapping[str, Any]:
     try:
         import yaml
     except ImportError as exc:
         raise ConfigError("PyYAML is required to load ATHA YAML configs") from exc
 
+    path = path.expanduser().resolve()
     if not path.exists():
         raise ConfigError(f"Config file not found: {path}")
+    if path in include_stack:
+        chain = " -> ".join(str(item) for item in (*include_stack, path))
+        raise ConfigError(f"YAML include cycle detected: {chain}")
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, Mapping):
         raise ConfigError(f"Config file must contain a YAML mapping: {path}")
-    return data
+    return _expand_yaml_includes(dict(data), path, (*include_stack, path))
+
+
+def _expand_yaml_includes(data: Dict[str, Any], path: Path, include_stack: tuple[Path, ...]) -> Mapping[str, Any]:
+    include_value = data.pop("$include", data.pop("include", None))
+    if include_value is None:
+        return data
+    if isinstance(include_value, (str, Path)):
+        include_refs = [str(include_value)]
+    elif isinstance(include_value, list):
+        include_refs = include_value
+    else:
+        raise ConfigError(f"YAML include in {path} must be a path string or list of path strings")
+
+    merged: Dict[str, Any] = {}
+    for index, ref in enumerate(include_refs):
+        if not isinstance(ref, str) or not ref:
+            raise ConfigError(f"YAML include[{index}] in {path} must be a non-empty path string")
+        include_path = Path(ref).expanduser()
+        if not include_path.is_absolute():
+            include_path = path.parent / include_path
+        included = _read_yaml_mapping(include_path, include_stack=include_stack)
+        merged = _merge_yaml_mappings(merged, dict(included))
+    return _merge_yaml_mappings(merged, data)
+
+
+def _merge_yaml_mappings(base: Dict[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], Mapping) and isinstance(value, Mapping):
+            merged[key] = _merge_yaml_mappings(dict(merged[key]), value)
+        elif key in merged and isinstance(merged[key], list) and isinstance(value, list):
+            merged[key] = [*merged[key], *value]
+        else:
+            merged[key] = value
+    return merged
 
 
 def _resolve_ref(ref: str, source_path: Path) -> Path:
@@ -227,20 +266,21 @@ def _is_controller_extension_path(path: str) -> bool:
 
 
 def _validate_controller_shape(name: str, controller_type: str, controller: Mapping[str, Any]) -> None:
+    common_allowed = {"active_phases"}
     allowed_by_type = {
-        "null": {"type", "input", "output"},
-        "of_mass_flow_split": {"type", "inputs", "outputs"},
-        "gain_product": {"type", "inputs", "output"},
-        "proportional": {"type", "inputs", "output", "parameters"},
-        "pi": {"type", "inputs", "output", "parameters"},
-        "pid": {"type", "inputs", "output", "parameters"},
-        "scheduled_gain": {"type", "inputs", "output"},
-        "limiter": {"type", "input", "output", "parameters"},
-        "rate_limiter": {"type", "input", "output", "parameters"},
-        "selector": {"type", "inputs", "output", "mode", "index"},
-        "min": {"type", "inputs", "output"},
-        "max": {"type", "inputs", "output"},
-        "python_function": {"type", "function", "outputs", "parameters"},
+        "null": {"type", "input", "output"} | common_allowed,
+        "of_mass_flow_split": {"type", "inputs", "outputs"} | common_allowed,
+        "gain_product": {"type", "inputs", "output"} | common_allowed,
+        "proportional": {"type", "inputs", "output", "parameters"} | common_allowed,
+        "pi": {"type", "inputs", "output", "parameters"} | common_allowed,
+        "pid": {"type", "inputs", "output", "parameters"} | common_allowed,
+        "scheduled_gain": {"type", "inputs", "output"} | common_allowed,
+        "limiter": {"type", "input", "output", "parameters"} | common_allowed,
+        "rate_limiter": {"type", "input", "output", "parameters"} | common_allowed,
+        "selector": {"type", "inputs", "output", "mode", "index"} | common_allowed,
+        "min": {"type", "inputs", "output"} | common_allowed,
+        "max": {"type", "inputs", "output"} | common_allowed,
+        "python_function": {"type", "function", "outputs", "parameters"} | common_allowed,
     }
     allowed = allowed_by_type.get(controller_type)
     if allowed is None:

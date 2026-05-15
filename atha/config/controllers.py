@@ -5,6 +5,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
+import numpy as np
+
 
 _FUNCTION_CACHE: dict[tuple[Path, str], Any] = {}
 
@@ -23,6 +25,10 @@ def evaluate_controllers(
     targets: Mapping[str, Any],
     timings: Mapping[str, Any] | None = None,
     measurements: Mapping[str, Any] | None = None,
+    *,
+    dt: float = 1.0,
+    current_phase: str | None = None,
+    previous_outputs: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Evaluate configured controller blocks.
 
@@ -35,9 +41,12 @@ def evaluate_controllers(
         return {}
     timings = timings or {}
     measurements = measurements or {}
+    previous_outputs = previous_outputs or {}
     outputs: Dict[str, Any] = {}
     for name in controller_execution_order(config.controllers):
         controller = config.controllers[name]
+        if not controller_is_active(controller, current_phase):
+            continue
         controller_type = controller.get("type")
         if controller_type is None or controller_type == "null":
             outputs[str(controller["output"])] = _lookup_signal(str(controller["input"]), targets, timings, measurements, outputs)
@@ -55,9 +64,9 @@ def evaluate_controllers(
             gain = float(_lookup_signal(str(inputs["gain"]), targets, timings, measurements, outputs))
             outputs[str(controller["output"])] = value * gain
         elif controller_type == "proportional":
-            outputs.update(_evaluate_feedback_controller(name, controller, targets, timings, measurements, outputs))
+            outputs.update(_evaluate_feedback_controller(name, controller, targets, timings, measurements, outputs, dt=dt, previous_outputs=previous_outputs))
         elif controller_type in {"pi", "pid"}:
-            outputs.update(_evaluate_feedback_controller(name, controller, targets, timings, measurements, outputs))
+            outputs.update(_evaluate_feedback_controller(name, controller, targets, timings, measurements, outputs, dt=dt, previous_outputs=previous_outputs))
         elif controller_type == "scheduled_gain":
             inputs = controller["inputs"]
             value = float(_lookup_signal(str(inputs["value"]), targets, timings, measurements, outputs))
@@ -107,6 +116,10 @@ def evaluate_dynamic_controllers(
     targets: Mapping[str, Any],
     timings: Mapping[str, Any] | None = None,
     measurements: Mapping[str, Any] | None = None,
+    *,
+    dt: float = 1.0,
+    current_phase: str | None = None,
+    previous_outputs: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Evaluate controllers that may depend on live simulation measurements."""
 
@@ -114,9 +127,12 @@ def evaluate_dynamic_controllers(
         return {}
     timings = timings or {}
     measurements = measurements or {}
+    previous_outputs = previous_outputs or {}
     outputs: Dict[str, Any] = {}
     for name in controller_execution_order(config.controllers):
         controller = config.controllers[name]
+        if not controller_is_active(controller, current_phase):
+            continue
         controller_type = controller.get("type")
         if controller_type == "python_function":
             function = _load_function(controller, config.path)
@@ -139,8 +155,44 @@ def evaluate_dynamic_controllers(
                 outputs.update({str(key): value for key, value in result.items()})
         else:
             sub_config = type("_SingleControllerConfig", (), {"controllers": {name: controller}})()
-            outputs.update(evaluate_controllers(sub_config, targets, {**timings, **outputs}, measurements))
+            outputs.update(
+                evaluate_controllers(
+                    sub_config,
+                    targets,
+                    {**timings, **outputs},
+                    measurements,
+                    dt=dt,
+                    current_phase=current_phase,
+                    previous_outputs=previous_outputs,
+                )
+            )
     return outputs
+
+
+def controller_evaluation_period(config) -> float | None:
+    """Return the configured controller sample period in seconds, if any."""
+
+    if config is None:
+        return None
+    evaluation = getattr(config, "evaluation", {}) or {}
+    if not isinstance(evaluation, Mapping):
+        return None
+    if "period_s" in evaluation:
+        period = float(evaluation["period_s"])
+    elif "frequency_hz" in evaluation:
+        frequency = float(evaluation["frequency_hz"])
+        period = 1.0 / frequency if frequency > 0.0 else 0.0
+    else:
+        return None
+    if period <= 0.0:
+        raise ValueError("controllers.evaluation period/frequency must be positive")
+    return period
+
+
+def controller_sample_index(t: float, period_s: float | None) -> int | None:
+    if period_s is None:
+        return None
+    return int(np.floor((float(t) + 1.0e-12) / period_s))
 
 
 def controller_state_infos(config) -> list[ControllerStateInfo]:
@@ -154,11 +206,20 @@ def controller_state_infos(config) -> list[ControllerStateInfo]:
         params = controller.get("parameters", {})
         if controller_type in STATEFUL_CONTROLLER_TYPES:
             states.append(ControllerStateInfo(f"controller.{name}.integral", float(params.get("integral_initial", 0.0))))
-        if controller_type == "pid":
-            states.append(ControllerStateInfo(f"controller.{name}.previous_error", float(params.get("previous_error_initial", 0.0))))
         if controller_type == "rate_limiter":
             states.append(ControllerStateInfo(f"controller.{name}.previous_command", float(params.get("initial", 0.0))))
     return states
+
+
+def controller_is_active(controller: Mapping[str, Any], current_phase: str | None) -> bool:
+    active_phases = controller.get("active_phases")
+    if active_phases is None:
+        return True
+    if isinstance(active_phases, str):
+        active = {active_phases}
+    else:
+        active = {str(phase) for phase in active_phases}
+    return current_phase in active
 
 
 def controller_execution_order(controllers: Mapping[str, Mapping[str, Any]]) -> list[str]:
@@ -241,6 +302,9 @@ def _evaluate_feedback_controller(
     timings: Mapping[str, Any],
     measurements: Mapping[str, Any],
     outputs: Mapping[str, Any],
+    *,
+    dt: float = 1.0,
+    previous_outputs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     controller_type = str(controller.get("type", "proportional"))
     inputs = controller["inputs"]
@@ -253,10 +317,20 @@ def _evaluate_feedback_controller(
     kp = float(params.get("gain", params.get("proportional_gain", params.get("kp", 0.0))))
     ki = float(params.get("ki", params.get("integral_gain", 0.0))) if controller_type in {"pi", "pid"} else 0.0
     kd = float(params.get("kd", params.get("derivative_gain", 0.0))) if controller_type == "pid" else 0.0
-    integral = float(params.get("integral_initial", 0.0))
-    previous_error = float(params.get("previous_error_initial", error))
-    derivative = error - previous_error
-    raw = bias + feed_forward + kp * error + ki * integral + kd * derivative
+    previous_outputs = previous_outputs or {}
+    previous_integral = float(previous_outputs.get(f"controller.{name}.integral", params.get("integral_initial", 0.0)))
+    previous_saturated = bool(float(previous_outputs.get(f"controller.{name}.saturated", 0.0)))
+    anti_windup = bool(params.get("anti_windup", True))
+    if controller_type in {"pi", "pid"} and not (anti_windup and previous_saturated):
+        integral = previous_integral + error * max(float(dt), 0.0)
+    else:
+        integral = previous_integral
+    previous_error = float(previous_outputs.get(f"controller.{name}.error", params.get("previous_error_initial", error)))
+    derivative = (error - previous_error) / max(float(dt), 1.0e-12) if controller_type == "pid" else 0.0
+    proportional_term = kp * error
+    integral_term = ki * integral
+    derivative_term = kd * derivative
+    raw = bias + feed_forward + proportional_term + integral_term + derivative_term
     lower = float(params.get("lower_limit", params.get("min", -float("inf"))))
     upper = float(params.get("upper_limit", params.get("max", float("inf"))))
     command = min(max(raw, lower), upper)
@@ -270,6 +344,9 @@ def _evaluate_feedback_controller(
         f"controller.{name}.saturated": float(command != raw),
         f"controller.{name}.integral": integral,
         f"controller.{name}.derivative": derivative,
+        f"controller.{name}.proportional_term": proportional_term,
+        f"controller.{name}.integral_term": integral_term,
+        f"controller.{name}.derivative_term": derivative_term,
     }
 
 

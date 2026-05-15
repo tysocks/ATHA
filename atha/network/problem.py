@@ -121,6 +121,7 @@ class NetworkProblem:
         name: str = "network",
         sparse_jacobian_hint: Any | None = None,
         strict_residuals: bool = True,
+        require_square: bool = True,
     ) -> None:
         self.name = name
         self.variables = list(variables)
@@ -128,6 +129,7 @@ class NetworkProblem:
         self._evaluator = evaluator
         self.sparse_jacobian_hint = sparse_jacobian_hint
         self.strict_residuals = strict_residuals
+        self.require_square = require_square
         self.variable_names = [variable.name for variable in self.variables]
         self.residual_names = [residual.name for residual in self.residual_definitions]
         self._validate_structure()
@@ -159,14 +161,31 @@ class NetworkProblem:
 
     def solve(self, t: float, z0: np.ndarray | WarmStart | None, inputs: Mapping[str, Any]) -> NetworkSolution:
         guess = self._initial_guess(z0)
+        if self.n_algebraic == 0 and len(self.residual_definitions) == 0:
+            solution = NetworkSolution(
+                z=guess,
+                values={},
+                residuals={},
+                normalized_residuals={},
+                success=True,
+                message="empty network solved",
+            )
+            if isinstance(z0, WarmStart):
+                z0.update(solution)
+            return solution
 
         def scaled_residual(z: np.ndarray) -> np.ndarray:
             return self.residual_vector(t, z, inputs) / self.residual_scales
 
-        root_result = root(scaled_residual, guess, method="hybr")
-        success = bool(root_result.success)
-        message = str(root_result.message)
-        z = np.asarray(root_result.x, dtype=float)
+        if len(self.variables) == len(self.residual_definitions):
+            root_result = root(scaled_residual, guess, method="hybr")
+            success = bool(root_result.success)
+            message = str(root_result.message)
+            z = np.asarray(root_result.x, dtype=float)
+        else:
+            success = False
+            message = "non-square network; using least-squares solve"
+            z = guess
 
         if not success:
             ls_result = least_squares(
@@ -240,7 +259,7 @@ class NetworkProblem:
             raise NetworkStructureError(f"duplicate algebraic variables in '{self.name}': {variable_duplicates}")
         if residual_duplicates:
             raise NetworkStructureError(f"duplicate algebraic residuals in '{self.name}': {residual_duplicates}")
-        if len(self.variables) != len(self.residual_definitions):
+        if self.require_square and len(self.variables) != len(self.residual_definitions):
             raise NetworkStructureError(
                 f"network problem '{self.name}' must be square; got "
                 f"{len(self.variables)} algebraic variables and {len(self.residual_definitions)} residuals"

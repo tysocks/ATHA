@@ -1,6 +1,26 @@
 name: ffsc_dae_acceptance_timings
 events:
   - target: main_lox_valve.command
-    value: 1.0
+    schedule:
+      type: step
+      time: 25.0
+      initial: 1.0
+      final: 0.0
   - target: main_methane_valve.command
-    value: 1.0
+    schedule:
+      type: step
+      time: 25.0
+      initial: 1.0
+      final: 0.0
+  - target: methane_crossover_valve.command
+    schedule:
+      type: step
+      time: 25.0
+      initial: 1.0
+      final: 0.0
+  - target: lox_crossover_valve.command
+    schedule:
+      type: step
+      time: 25.0
+      initial: 1.0
+      final: 0.0

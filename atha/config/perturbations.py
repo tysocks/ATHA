@@ -29,6 +29,18 @@ def _set_path(obj: Any, parts: list[str], value: Any) -> Any:
     if isinstance(obj, dict):
         updated = dict(obj)
         if head not in updated:
+            joined = None
+            joined_tail: list[str] = []
+            for end in range(len(parts), 0, -1):
+                candidate = ".".join(parts[:end])
+                if candidate in updated:
+                    joined = candidate
+                    joined_tail = parts[end:]
+                    break
+            if joined is not None:
+                updated[joined] = _set_path(updated[joined], joined_tail, value)
+                return updated
+        if head not in updated:
             raise KeyError(f"override path segment not found: {head}")
         updated[head] = _set_path(updated[head], tail, value)
         return updated

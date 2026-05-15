@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from atha.components.registry import component_residual_contract, component_spec
+from atha.config import build_performance_maps
 from atha.config.loader import LoadedAnalysisConfig
 from atha.config.controllers import controller_state_infos
 from atha.config.schema import ComponentConfig
 from atha.config.transients import TransientSystem
 from atha.network import NetworkProblem
+from atha.network.ports import PortNetworkBuilder
 from atha.components.residuals import ResidualEvaluationContext
 
 
@@ -46,6 +48,7 @@ class EngineAssembler:
 
     def __init__(self, loaded: LoadedAnalysisConfig) -> None:
         self.loaded = loaded
+        self._runtime_maps = build_performance_maps(loaded.maps) if loaded.maps else {}
 
     def source_catalog(self) -> SourceCatalog:
         catalog = SourceCatalog()
@@ -57,6 +60,7 @@ class EngineAssembler:
         self._add_transient_sources(catalog)
         self._add_component_sources(catalog)
         self._add_connection_sources(catalog)
+        self._add_port_network_sources(catalog)
         return catalog
 
     def telemetry_sources(self, extra_sources: Iterable[str] = ()) -> set[str]:
@@ -91,11 +95,22 @@ class EngineAssembler:
 
         return NetworkProblem(variables, residuals, evaluate, name=f"{self.loaded.engine.name}_component_contracts")
 
+    def port_network_problem(self, *, require_square: bool = False) -> NetworkProblem:
+        """Build the automatic port-variable network problem for this engine."""
+
+        return PortNetworkBuilder(self.loaded).build_problem(require_square=require_square)
+
     def initial_vectors(self) -> InitialVectors:
         """Generate generic initial state/algebraic vectors from YAML metadata."""
 
         state_values: dict[str, float] = {}
         for component in self.loaded.engine.components.values():
+            spec = component_spec(component.type)
+            for state_name in spec.state_names:
+                state_values.setdefault(
+                    f"{component.name}.{state_name}",
+                    _initial_state_value(component, state_name),
+                )
             for state_name, value in component.initial_state.items():
                 state_values[f"{component.name}.{state_name}"] = float(value)
         transient_system = TransientSystem.from_configs(self.loaded.transients)
@@ -122,9 +137,14 @@ class EngineAssembler:
         )
 
     def _component_model(self) -> dict[str, float]:
-        model: dict[str, float] = {}
+        model: dict[str, object] = {}
         for component in self.loaded.engine.components.values():
             params = component.parameters
+            for slot, binding in component.maps.items():
+                if binding.ref in self._runtime_maps:
+                    model[f"{component.name}.map.{slot}"] = self._runtime_maps[binding.ref]
+                    if binding.output:
+                        model[f"{component.name}.map.{slot}.output"] = binding.output
             if component.type == "Valve":
                 if "CdA" in params:
                     model[f"{component.name}_CdA"] = float(params["CdA"])
@@ -188,6 +208,9 @@ class EngineAssembler:
                     f"controller.{name}.saturated",
                     f"controller.{name}.integral",
                     f"controller.{name}.derivative",
+                    f"controller.{name}.proportional_term",
+                    f"controller.{name}.integral_term",
+                    f"controller.{name}.derivative_term",
                     f"controller.{name}.rate",
                 )
         for state in controller_state_infos(self.loaded.controllers):
@@ -227,6 +250,10 @@ class EngineAssembler:
             elif connection.domain == "thermal":
                 catalog.add(f"{base}.T_wall", f"{base}.Q_dot")
 
+    def _add_port_network_sources(self, catalog: SourceCatalog) -> None:
+        port_catalog = PortNetworkBuilder(self.loaded).catalog()
+        catalog.update(port_catalog.source_paths())
+
 
 def _component_source_paths(component: ComponentConfig) -> set[str]:
     name = component.name
@@ -248,6 +275,8 @@ def _component_source_paths(component: ComponentConfig) -> set[str]:
             f"{name}.mdot",
             f"{name}.inlet_mdot",
             f"{name}.inlet.mdot",
+            f"{name}.inlet.h",
+            f"{name}.outlet.h",
             f"{name}.delta_P",
             f"{name}.pressure_rise",
             f"{name}.power",
@@ -269,3 +298,22 @@ def _component_source_paths(component: ComponentConfig) -> set[str]:
     if component.type in {"Outlet", "OutletInertia"}:
         return common | {f"{name}.mdot", f"{name}.mdot_steady"}
     return common
+
+
+def _initial_state_value(component: ComponentConfig, state_name: str) -> float:
+    params = component.parameters
+    if f"initial_{state_name}" in params:
+        value = params[f"initial_{state_name}"]
+    elif state_name == "omega" and "initial_speed_rpm" in params:
+        value = float(params["initial_speed_rpm"]) * 3.141592653589793 / 30.0
+    elif state_name == "P":
+        value = params.get("initial_P", 101325.0)
+    elif state_name == "T_wall":
+        value = params.get("initial_T_wall", params.get("T_wall", 300.0))
+    elif state_name == "h":
+        value = params.get("initial_h", 0.0)
+    elif state_name == "mdot":
+        value = params.get("initial_mdot", params.get("mdot_design", 0.0))
+    else:
+        value = 0.0
+    return float(value)

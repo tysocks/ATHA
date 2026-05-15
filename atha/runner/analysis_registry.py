@@ -110,10 +110,71 @@ def default_analysis_registry() -> AnalysisRegistry:
     )
     registry.register(
         AnalysisSpec(
+            type_name="gg_single_shaft_transient",
+            handler=_run_gg_single_shaft,
+            mode="transient",
+            description="Reduced-order methalox gas-generator single-shaft transient.",
+        )
+    )
+    registry.register(
+        AnalysisSpec(
             type_name="nominal_mc_sweep",
             handler=_run_nominal_mc_sweep,
             mode="sweep",
             description="Gas-generator nominal solve with Monte Carlo and speed sweep.",
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="port_network_diagnostics",
+            handler=_run_port_network_diagnostics,
+            mode="steady",
+            description="Generic automatic port-variable network diagnostics and algebraic solve.",
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="steady",
+            handler=_run_generic_steady,
+            mode="steady",
+            description="Generic steady port-network trim/diagnostics.",
+            accepts_context=True,
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="profile",
+            handler=_run_generic_profile,
+            mode="profile",
+            description="Generic DAE profile execution through the universal runner.",
+            accepts_context=True,
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="linearization",
+            handler=_run_generic_linearization,
+            mode="linearization",
+            description="Generic finite-difference DAE linearization.",
+            accepts_context=True,
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="sweep",
+            handler=_run_generic_sweep,
+            mode="sweep",
+            description="Generic structured sweep over YAML dotted-path perturbations.",
+            accepts_context=True,
+        )
+    )
+    registry.register(
+        AnalysisSpec(
+            type_name="monte_carlo",
+            handler=_run_generic_sweep,
+            mode="sweep",
+            description="Generic Monte Carlo over YAML dotted-path perturbations.",
+            accepts_context=True,
         )
     )
     return registry
@@ -137,10 +198,46 @@ def _run_ffsc_dae_acceptance(config_path: Path, output_dir: Path) -> object:
     return run_ffsc_dae_transient(config_path, output_dir=output_dir)
 
 
+def _run_gg_single_shaft(config_path: Path, output_dir: Path) -> object:
+    from atha.analysis.gg_single_shaft import run_gg_single_shaft_transient
+
+    return run_gg_single_shaft_transient(config_path, output_dir=output_dir)
+
+
 def _run_nominal_mc_sweep(config_path: Path, output_dir: Path) -> object:
     from atha.analysis.gg_mc_sweep import run_nominal_mc_sweep
 
     return run_nominal_mc_sweep(config_path, output_dir=output_dir)
+
+
+def _run_port_network_diagnostics(config_path: Path, output_dir: Path) -> object:
+    from atha.analysis.port_network import run_port_network_diagnostics
+
+    return run_port_network_diagnostics(config_path, output_dir=output_dir)
+
+
+def _run_generic_steady(context: AnalysisContext) -> object:
+    from atha.analysis.generic_modes import run_generic_steady
+
+    return run_generic_steady(context)
+
+
+def _run_generic_profile(context: AnalysisContext) -> object:
+    from atha.analysis.generic_modes import run_generic_profile
+
+    return run_generic_profile(context)
+
+
+def _run_generic_linearization(context: AnalysisContext) -> object:
+    from atha.analysis.generic_modes import run_generic_linearization
+
+    return run_generic_linearization(context)
+
+
+def _run_generic_sweep(context: AnalysisContext) -> object:
+    from atha.analysis.generic_sweep import run_generic_sweep
+
+    return run_generic_sweep(context)
 
 
 DEFAULT_ANALYSIS_REGISTRY = default_analysis_registry()

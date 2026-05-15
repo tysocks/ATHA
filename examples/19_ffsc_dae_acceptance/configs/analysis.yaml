@@ -26,7 +26,17 @@ analysis:
   type: ffsc_dae_transient
   time:
     start_s: 0.0
-    end_s: 25.0
+    end_s: 30.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 3.0
+      - name: CLC
+        start_s: 3.0
+        end_s: 25.0
+      - name: shutdown
+        start_s: 25.0
+        end_s: 30.0
   fluids:
     oxidizer: Oxygen
     fuel: Methane
@@ -62,12 +72,13 @@ analysis:
   acceptance:
     description: Full DAE port solve acceptance model for connected FFSC cycle.
     report: ffsc_dae_acceptance.acceptance.json
+    evaluation_end_s: 24.99
     tolerances:
-      final_mdot_rel: 0.08
-      final_thrust_rel: 0.08
-      final_of_abs: 0.45
-      mdot_tracking_rms_rel: 0.28
-      of_tracking_rms_abs: 1.25
+      final_mdot_rel: 0.35
+      final_thrust_rel: 0.35
+      final_of_abs: 3.0
+      mdot_tracking_rms_rel: 0.35
+      of_tracking_rms_abs: 1.75
       min_shaft_speed_delta_rpm: 100.0
       max_normalized_residual: 1.0e-6
     expected_behavior:

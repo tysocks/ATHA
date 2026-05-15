@@ -24,6 +24,7 @@ class AnalysisContext:
     analysis_type: str
     mode: str
     execution_plan: Any
+    registry: Any | None = None
 
     @property
     def analysis(self) -> dict[str, Any]:

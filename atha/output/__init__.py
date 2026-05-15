@@ -1,4 +1,12 @@
-from atha.output.comparison import ChannelComparison, compare_time_series, write_comparison_report_json
+from atha.output.comparison import (
+    ChannelComparison,
+    compare_time_series,
+    compare_time_series_files,
+    load_time_series,
+    load_time_series_csv,
+    load_time_series_hdf5,
+    write_comparison_report_json,
+)
 from atha.output.diagnostics import (
     ResidualDiagnosticRecord,
     residual_diagnostics_from_mapping,
@@ -21,6 +29,10 @@ __all__ = [
     "ResidualDiagnosticRecord",
     "build_telemetry_rows",
     "compare_time_series",
+    "compare_time_series_files",
+    "load_time_series",
+    "load_time_series_csv",
+    "load_time_series_hdf5",
     "residual_diagnostics_from_mapping",
     "validate_telemetry_sources",
     "write_comparison_report_json",

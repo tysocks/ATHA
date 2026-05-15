@@ -4,25 +4,25 @@ transients:
     type: first_order
     input: methane_crossover_valve.command
     output: methane_crossover_valve.position
-    initial: 0.50
+    initial: 0.5
     parameters:
-      time_constant: 0.1
+      time_constant: 0.25
       lower_limit: 0.05
       upper_limit: 1.00
   lox_crossover_valve:
     type: first_order
     input: lox_crossover_valve.command
     output: lox_crossover_valve.position
-    initial: 0.50
+    initial: 0.5
     parameters:
-      time_constant: 0.1
+      time_constant: 0.25
       lower_limit: 0.05
       upper_limit: 1.00
   main_lox_valve:
     type: first_order
     input: main_lox_valve.command
     output: main_lox_valve.position
-    initial: 1.00
+    initial: 0.9
     parameters:
       time_constant: 0.10
       lower_limit: 0.0
@@ -31,7 +31,7 @@ transients:
     type: first_order
     input: main_methane_valve.command
     output: main_methane_valve.position
-    initial: 1.00
+    initial: 0.9
     parameters:
       time_constant: 0.10
       lower_limit: 0.0
