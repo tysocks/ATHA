@@ -1,0 +1,10 @@
+name: ethanol_lox_5kn_two_shaft_gg_timings
+events:
+  - target: main_lox_valve.command
+    schedule: {type: step, time: 8.0, initial: 1.0, final: 0.0}
+  - target: main_fuel_valve.command
+    schedule: {type: step, time: 8.0, initial: 1.0, final: 0.0}
+  - target: lox_generator_valve.command
+    schedule: {type: step, time: 8.0, initial: 0.45, final: 0.0}
+  - target: fuel_generator_valve.command
+    schedule: {type: step, time: 8.0, initial: 0.45, final: 0.0}

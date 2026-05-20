@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from atha.config.schema import ComponentConfig, ConfigError, EngineConfig, TransientConfig
+from atha.components.derivatives import ComponentDerivativeContract, derivative_contract_for_type
 from atha.components.residuals import ComponentResidualContract, residual_contract_for_type
 
 
@@ -27,6 +28,7 @@ class ComponentSpec:
     map_slots: frozenset[str] = frozenset()
     transient_inputs: tuple[str, ...] = ()
     residual_contract: ComponentResidualContract | None = None
+    derivative_contract: ComponentDerivativeContract | None = None
 
     @property
     def accepted_parameters(self) -> frozenset[str]:
@@ -106,6 +108,10 @@ class ComponentRegistry:
         spec = self.get(component.type)
         return spec.residual_contract
 
+    def derivative_contract(self, component: ComponentConfig) -> ComponentDerivativeContract | None:
+        spec = self.get(component.type)
+        return spec.derivative_contract
+
 
 def default_component_registry() -> ComponentRegistry:
     registry = ComponentRegistry()
@@ -125,15 +131,38 @@ def default_component_registry() -> ComponentRegistry:
     )
     registry.register(
         ComponentSpec(
+            "BoundarySource",
+            optional_parameters=frozenset({"P", "T", "rho", "gamma", "h", "cp", "specific_heat"}),
+            allow_extra_parameters=True,
+            ports={"outlet": "fluid_out"},
+            residual_names=("outlet.P_residual", "outlet.T_residual", "outlet.rho_residual", "outlet.gamma_residual", "outlet.h_residual"),
+            output_paths=("outlet.P", "outlet.T", "outlet.rho", "outlet.gamma", "outlet.h", "outlet.mdot"),
+            residual_contract=residual_contract_for_type("BoundarySource"),
+        )
+    )
+    registry.register(
+        ComponentSpec(
+            "BoundarySink",
+            optional_parameters=frozenset({"P", "T", "rho", "gamma", "h", "inlet_P", "inlet_T", "inlet_rho", "inlet_gamma", "inlet_h"}),
+            allow_extra_parameters=True,
+            ports={"inlet": "fluid_in"},
+            residual_names=("inlet.P_residual",),
+            output_paths=("inlet.P", "inlet.T", "inlet.rho", "inlet.gamma", "inlet.h", "inlet.mdot"),
+            residual_contract=residual_contract_for_type("BoundarySink"),
+        )
+    )
+    registry.register(
+        ComponentSpec(
             "Pipe",
             optional_parameters=frozenset({"length", "diameter", "time_constant", "friction_factor", "conductance", "mdot_design", "fallback_conductance"}),
             model_extractor=_extract_pipe_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("mdot",),
-            algebraic_variables=("mdot",),
-            residual_names=("momentum_residual",),
-            output_paths=("mdot", "mdot_steady", "P", "dP"),
+            algebraic_variables=("mdot", "dP_friction", "dmdot_dt"),
+            residual_names=("momentum_residual", "friction_residual", "inertance_residual"),
+            output_paths=("mdot", "mdot_steady", "P", "dP", "dP_friction", "dmdot_dt"),
             residual_contract=residual_contract_for_type("Pipe"),
+            derivative_contract=derivative_contract_for_type("Pipe"),
         )
     )
     registry.register(
@@ -142,8 +171,8 @@ def default_component_registry() -> ComponentRegistry:
             optional_parameters=frozenset({"delta_P_nominal"}),
             model_extractor=_extract_injector_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
-            algebraic_variables=("outlet.P",),
-            residual_names=("delta_P_residual",),
+            algebraic_variables=("outlet.P", "mdot"),
+            residual_names=("delta_P_residual", "mdot_residual"),
             output_paths=("mdot", "delta_P", "P"),
             residual_contract=residual_contract_for_type("MassFlowInjector"),
         )
@@ -155,10 +184,11 @@ def default_component_registry() -> ComponentRegistry:
             model_extractor=_extract_chamber_model,
             ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
-            algebraic_variables=("P", "OF", "T", "mdot"),
-            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual"),
+            algebraic_variables=("P", "OF", "T", "mdot", "h", "rho", "gamma"),
+            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual", "energy_residual", "density_residual", "gamma_residual"),
             output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
             residual_contract=residual_contract_for_type("CombustionChamber"),
+            derivative_contract=derivative_contract_for_type("CombustionChamber"),
         )
     )
     registry.register(
@@ -167,8 +197,8 @@ def default_component_registry() -> ComponentRegistry:
             optional_parameters=frozenset({"throat_area", "exit_area", "conductance", "thrust_coefficient", "efficiencies"}),
             model_extractor=_extract_nozzle_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
-            algebraic_variables=("mdot",),
-            residual_names=("mdot_residual",),
+            algebraic_variables=("mdot", "thrust", "Cf", "c_star"),
+            residual_names=("mdot_residual", "thrust_residual", "Cf_residual", "c_star_residual"),
             output_paths=("mdot", "thrust", "Isp_vacuum", "Cf", "c_star"),
             residual_contract=residual_contract_for_type("Nozzle"),
         )
@@ -202,9 +232,9 @@ def default_component_registry() -> ComponentRegistry:
             optional_parameters=frozenset({"diameter", "pump_map", "delta_P_design", "mdot_design", "omega_design", "efficiency_design"}),
             allow_extra_parameters=True,
             ports={"inlet": "fluid_in", "outlet": "fluid_out", "shaft": "shaft_in"},
-            algebraic_variables=("delta_P",),
-            residual_names=("delta_P_residual",),
-            output_paths=("mdot", "delta_P", "pressure_rise", "power", "tau_load", "efficiency"),
+            algebraic_variables=("delta_P", "power", "outlet.h", "tau_load", "efficiency"),
+            residual_names=("delta_P_residual", "power_residual", "outlet_h_residual", "tau_load_residual", "efficiency_residual"),
+            output_paths=("mdot", "delta_P", "pressure_rise", "power", "tau_load", "efficiency", "outlet.h"),
             map_slots=frozenset({"head_map", "efficiency_map"}),
             residual_contract=residual_contract_for_type("Pump"),
         )
@@ -215,9 +245,9 @@ def default_component_registry() -> ComponentRegistry:
             optional_parameters=frozenset({"efficiency", "pressure_ratio", "power_design", "mdot_design", "diameter", "turbine_map"}),
             allow_extra_parameters=True,
             ports={"inlet": "fluid_in", "outlet": "fluid_out", "shaft": "shaft_out"},
-            algebraic_variables=("power",),
-            residual_names=("power_residual",),
-            output_paths=("mdot", "pressure_ratio", "power", "tau_drive", "efficiency"),
+            algebraic_variables=("power", "outlet.h", "tau_drive", "efficiency", "pressure_ratio"),
+            residual_names=("power_residual", "outlet_h_residual", "tau_drive_residual", "efficiency_residual", "pressure_ratio_residual"),
+            output_paths=("mdot", "pressure_ratio", "power", "tau_drive", "efficiency", "outlet.h"),
             map_slots=frozenset({"pressure_ratio_map", "efficiency_map"}),
             residual_contract=residual_contract_for_type("Turbine"),
         )
@@ -228,9 +258,9 @@ def default_component_registry() -> ComponentRegistry:
             optional_parameters=frozenset({"split_fraction"}),
             allow_extra_parameters=True,
             ports={"inlet": "fluid_in", "outlet_a": "fluid_out", "outlet_b": "fluid_out"},
-            algebraic_variables=("outlet_a.mdot", "outlet_b.mdot"),
-            residual_names=("outlet_a.mdot_residual", "outlet_b.mdot_residual"),
-            output_paths=("inlet.mdot", "outlet_a.mdot", "outlet_b.mdot"),
+            algebraic_variables=("outlet_a.mdot", "outlet_b.mdot", "outlet_a.h", "outlet_b.h"),
+            residual_names=("outlet_a.mdot_residual", "outlet_b.mdot_residual", "outlet_a.h_residual", "outlet_b.h_residual"),
+            output_paths=("inlet.mdot", "inlet.h", "outlet_a.mdot", "outlet_b.mdot", "outlet_a.h", "outlet_b.h"),
             residual_contract=residual_contract_for_type("FlowSplitter"),
         )
     )
@@ -244,6 +274,7 @@ def default_component_registry() -> ComponentRegistry:
             output_paths=("omega", "rpm", "tau_drive", "tau_load"),
             ports={"shaft": "shaft"},
             residual_contract=residual_contract_for_type("Rotor"),
+            derivative_contract=derivative_contract_for_type("Rotor"),
         )
     )
     registry.register(
@@ -252,10 +283,11 @@ def default_component_registry() -> ComponentRegistry:
             allow_extra_parameters=True,
             ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
-            algebraic_variables=("P", "OF", "T", "mdot"),
-            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual"),
+            algebraic_variables=("P", "OF", "T", "mdot", "h", "rho", "gamma"),
+            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual", "energy_residual", "density_residual", "gamma_residual"),
             output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
             residual_contract=residual_contract_for_type("Preburner"),
+            derivative_contract=derivative_contract_for_type("Preburner"),
         )
     )
     registry.register(
@@ -270,8 +302,30 @@ def default_component_registry() -> ComponentRegistry:
             residual_contract=residual_contract_for_type("RegenChannel"),
         )
     )
-    for type_name in ("GasGenerator", "OrificeCompressible"):
-        registry.register(ComponentSpec(type_name, allow_extra_parameters=True))
+    registry.register(
+        ComponentSpec(
+            "GasGenerator",
+            allow_extra_parameters=True,
+            ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "inlet": "fluid_in", "outlet": "fluid_out"},
+            state_names=("P", "h"),
+            algebraic_variables=("P", "OF", "T", "mdot", "h", "rho", "gamma"),
+            residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual", "energy_residual", "density_residual", "gamma_residual"),
+            output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
+            residual_contract=residual_contract_for_type("Preburner"),
+            derivative_contract=derivative_contract_for_type("GasGenerator"),
+        )
+    )
+    registry.register(
+        ComponentSpec(
+            "OrificeCompressible",
+            allow_extra_parameters=True,
+            ports={"inlet": "fluid_in", "outlet": "fluid_out"},
+            algebraic_variables=("mdot",),
+            residual_names=("mdot_residual",),
+            output_paths=("mdot", "CdA", "choked"),
+            residual_contract=residual_contract_for_type("OrificeCompressible"),
+        )
+    )
     return registry
 
 
@@ -368,3 +422,7 @@ def component_spec(type_name: str) -> ComponentSpec:
 
 def component_residual_contract(component: ComponentConfig) -> ComponentResidualContract | None:
     return DEFAULT_COMPONENT_REGISTRY.residual_contract(component)
+
+
+def component_derivative_contract(component: ComponentConfig) -> ComponentDerivativeContract | None:
+    return DEFAULT_COMPONENT_REGISTRY.derivative_contract(component)

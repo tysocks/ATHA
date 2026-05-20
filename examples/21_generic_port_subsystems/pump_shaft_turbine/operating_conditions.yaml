@@ -1,0 +1,4 @@
+name: pump_shaft_turbine_targets
+targets:
+  mdot_total: {value: 10.0}
+  OF: {value: 3.2}

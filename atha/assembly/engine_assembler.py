@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from atha.components.registry import component_residual_contract, component_spec
-from atha.config import build_performance_maps
+from atha.config import build_performance_maps, evaluate_boundary_conditions
+from atha.config.balances import balance_configs, wrap_problem_with_balances
 from atha.config.loader import LoadedAnalysisConfig
 from atha.config.controllers import controller_state_infos
 from atha.config.schema import ComponentConfig
@@ -66,7 +67,7 @@ class EngineAssembler:
     def telemetry_sources(self, extra_sources: Iterable[str] = ()) -> set[str]:
         return self.source_catalog().with_sources(extra_sources).sources
 
-    def residual_network_problem(self) -> NetworkProblem:
+    def residual_network_problem(self, *, require_square: bool = True) -> NetworkProblem:
         """Build a square NetworkProblem from registered component residual contracts.
 
         This is the Phase-11 component-contract assembly bridge. It intentionally
@@ -93,12 +94,24 @@ class EngineAssembler:
                 result.update(contract.evaluate(component, context))
             return result
 
-        return NetworkProblem(variables, residuals, evaluate, name=f"{self.loaded.engine.name}_component_contracts")
+        return NetworkProblem(variables, residuals, evaluate, name=f"{self.loaded.engine.name}_component_contracts", require_square=require_square)
 
     def port_network_problem(self, *, require_square: bool = False) -> NetworkProblem:
         """Build the automatic port-variable network problem for this engine."""
 
-        return PortNetworkBuilder(self.loaded).build_problem(require_square=require_square)
+        problem = PortNetworkBuilder(self.loaded).build_problem(require_square=require_square)
+        balances = balance_configs(self.loaded.analysis_config.analysis.get("balances", {}))
+        if not balances:
+            return problem
+        allowed_sources = self.source_catalog().sources
+        allowed_sources.update(problem.variable_names)
+        allowed_sources.update(problem.residual_names)
+        allowed_sources.update(f"residuals.{name}" for name in problem.residual_names)
+        for balance in balances:
+            allowed_sources.add(balance.variable)
+            allowed_sources.add(f"balances.{balance.name}.residual")
+            allowed_sources.add(f"residuals.balances.{balance.name}.residual")
+        return wrap_problem_with_balances(problem, balances, allowed_sources=allowed_sources)
 
     def initial_vectors(self) -> InitialVectors:
         """Generate generic initial state/algebraic vectors from YAML metadata."""
@@ -123,8 +136,10 @@ class EngineAssembler:
             for name, value in overrides.items():
                 state_values[str(name)] = float(value)
 
-        problem = self.residual_network_problem()
+        problem = self.residual_network_problem(require_square=False)
         z_values = {name: float(value) for name, value in zip(problem.variable_names, problem.initial_z)}
+        for balance in balance_configs(self.loaded.analysis_config.analysis.get("balances", {})):
+            z_values.setdefault(balance.variable, float(balance.initial))
         z_overrides = self.loaded.analysis_config.analysis.get("initial_algebraic", {})
         if isinstance(z_overrides, dict):
             for name, value in z_overrides.items():
@@ -161,7 +176,10 @@ class EngineAssembler:
         if self.loaded.boundary_conditions is None:
             return
         catalog.update(self.loaded.boundary_conditions.conditions)
+        catalog.update(evaluate_boundary_conditions(self.loaded.boundary_conditions, 0.0))
         for name in self.loaded.boundary_conditions.conditions:
+            catalog.add(f"boundaries.{name}")
+        for name in evaluate_boundary_conditions(self.loaded.boundary_conditions, 0.0):
             catalog.add(f"boundaries.{name}")
 
     def _add_target_sources(self, catalog: SourceCatalog) -> None:
@@ -253,6 +271,8 @@ class EngineAssembler:
     def _add_port_network_sources(self, catalog: SourceCatalog) -> None:
         port_catalog = PortNetworkBuilder(self.loaded).catalog()
         catalog.update(port_catalog.source_paths())
+        for balance in balance_configs(self.loaded.analysis_config.analysis.get("balances", {})):
+            catalog.add(balance.variable, f"balances.{balance.name}.residual", f"residuals.balances.{balance.name}.residual")
 
 
 def _component_source_paths(component: ComponentConfig) -> set[str]:
@@ -264,7 +284,7 @@ def _component_source_paths(component: ComponentConfig) -> set[str]:
         return common | {f"{name}.mdot", f"{name}.mdot_steady", f"{name}.P", f"{name}.dP"}
     if component.type == "MassFlowInjector":
         return common | {f"{name}.mdot", f"{name}.delta_P", f"{name}.P"}
-    if component.type in {"CombustionChamber", "Preburner"}:
+    if component.type in {"CombustionChamber", "Preburner", "GasGenerator"}:
         return common | {f"{name}.P", f"{name}.T", f"{name}.OF", f"{name}.mdot", f"{name}.h"}
     if component.type == "Nozzle":
         return common | {f"{name}.mdot", f"{name}.thrust", f"{name}.Isp_vacuum"}

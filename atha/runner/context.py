@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from atha.assembly import EngineAssembler
 from atha.config.loader import LoadedAnalysisConfig
+from atha.runner.progress import SolverProgressEvent
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class AnalysisContext:
     mode: str
     execution_plan: Any
     registry: Any | None = None
+    progress_callback: Callable[[SolverProgressEvent], None] | None = None
 
     @property
     def analysis(self) -> dict[str, Any]:

@@ -1,24 +1,54 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
 from atha.assembly import EngineAssembler
+from atha.components.derivatives import DerivativeEvaluationContext
+from atha.components.registry import component_derivative_contract, component_spec
 from atha.config import (
     TransientSystem,
+    balance_configs,
     controller_execution_order,
     evaluate_boundary_conditions,
     evaluate_operating_targets,
     evaluate_timing_events,
 )
+from atha.config.schedules import collect_config_breakpoints
 from atha.config.controllers import controller_state_infos
 from atha.config.controllers import controller_evaluation_period, controller_is_active, controller_sample_index
 from atha.config.loader import LoadedAnalysisConfig
 from atha.network import NetworkProblem, WarmStart
+from atha.network.preconditioner import precondition_algebraic_guess
+from atha.runner.progress import SolverProgressEvent
 from atha.runner.solver_driver import ExecutionPlan
+
+
+class ReducedCycleExecutionProvider(Protocol):
+    name: str
+    network_problem: NetworkProblem
+
+    def initial_state_overrides(self) -> Mapping[str, float]:
+        ...
+
+    def measurements(self, states: Mapping[str, float], algebraics: Mapping[str, float]) -> Mapping[str, float]:
+        ...
+
+    def solve_algebraics(self, t: float, inputs: Mapping[str, Any]):
+        ...
+
+    def derivatives(
+        self,
+        t: float,
+        states: Mapping[str, float],
+        algebraics: Mapping[str, float],
+        commands: Mapping[str, float],
+        timings: Mapping[str, Any],
+    ) -> Mapping[str, float]:
+        ...
 
 
 @dataclass
@@ -49,6 +79,26 @@ class DAEExecutionResult:
     boundary_history: dict[str, np.ndarray]
     measurement_history: dict[str, np.ndarray]
     points: list[DAEPoint] = field(default_factory=list)
+    segments: list["IntegrationSegment"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class IntegrationSegment:
+    start_s: float
+    end_s: float
+    reason: str = "scheduled_breakpoint"
+
+
+@dataclass(frozen=True)
+class DAESolvePolicy:
+    allow_non_square: bool = False
+    checked: bool = True
+    residual_tolerance: float = 1.0e-8
+    max_nfev: int | None = None
+    strict_sources: bool = False
+    corrector: str = "none"
+    corrector_iterations: int = 1
+    preconditioner: str = "none"
 
 
 class DAEExecutionProblem:
@@ -68,16 +118,32 @@ class DAEExecutionProblem:
         execution_plan: ExecutionPlan,
         *,
         network_problem: NetworkProblem | None = None,
+        reduced_cycle_provider: ReducedCycleExecutionProvider | None = None,
+        progress_callback: Callable[[SolverProgressEvent], None] | None = None,
     ) -> None:
         self.loaded = loaded
         self.execution_plan = execution_plan
         self.assembler = EngineAssembler(loaded)
-        self.network_problem = network_problem or self.assembler.port_network_problem()
+        self.solve_policy = _dae_solve_policy(loaded, execution_plan)
+        self.progress_callback = progress_callback
+        self._last_progress_percent = -1.0e9
+        self.reduced_cycle_provider = reduced_cycle_provider
+        self.network_problem = network_problem or (
+            reduced_cycle_provider.network_problem if reduced_cycle_provider is not None else None
+        ) or self.assembler.port_network_problem(
+            require_square=not self.solve_policy.allow_non_square
+        )
         initial_vectors = self.assembler.initial_vectors()
         self.state_names = initial_vectors.state_names
         self.X0 = np.asarray(initial_vectors.X, dtype=float)
+        if reduced_cycle_provider is not None:
+            self._apply_initial_state_overrides(reduced_cycle_provider.initial_state_overrides())
         self.algebraic_names = self.network_problem.variable_names
         self.Z0 = self.network_problem.initial_z.copy()
+        self._apply_initial_algebraic_overrides()
+        self.Z0 = self._precondition_guess(0.0, self.Z0, {})
+        if self.solve_policy.strict_sources:
+            _validate_strict_full_port_sources(loaded)
         self.transient_system = TransientSystem.from_configs(loaded.transients)
         self._transient_state_indexes = {
             name: self.state_names.index(name)
@@ -92,9 +158,22 @@ class DAEExecutionProblem:
         self._controller_period_s = controller_evaluation_period(loaded.controllers)
         self._controller_hold_cache: dict[int, dict[str, Any]] = {}
         self._shaft_couplings = _shaft_couplings(loaded.engine.components, loaded.engine.connections)
+        self.balances = balance_configs(loaded.analysis_config.analysis.get("balances", {}))
 
     def initial_state(self) -> np.ndarray:
         return self.X0.copy()
+
+    def trim_initial_conditions(self, t: float | None = None) -> DAEPoint:
+        trim_time = self.execution_plan.time_start_s if t is None else float(t)
+        point = self.evaluate(trim_time, self.X0.copy(), self.Z0.copy())
+        self.Z0 = np.asarray(
+            [point.algebraics.get(name, self.Z0[i]) for i, name in enumerate(self.algebraic_names)],
+            dtype=float,
+        )
+        for i, name in enumerate(self.state_names):
+            if name in point.algebraics:
+                self.X0[i] = float(point.algebraics[name])
+        return point
 
     def evaluate(self, t: float, x: np.ndarray, warm_start: WarmStart | np.ndarray | None = None) -> DAEPoint:
         states = self._state_dict(x)
@@ -104,13 +183,13 @@ class DAEExecutionProblem:
         transient_state = self._transient_state_vector(x)
         commands = self._evaluate_controllers(t, targets, timings, {}, states)
         transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(states, targets, boundaries, timings, commands, transient_sources)
-        solution = self.network_problem.solve(t, warm_start, {"inputs": network_inputs})
+        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+        solution = self._solve_network(t, warm_start, network_inputs)
         measurements = self._measurements(solution.values, states)
         commands = self._evaluate_controllers(t, targets, timings, measurements, states)
         transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(states, targets, boundaries, timings, commands, transient_sources)
-        solution = self.network_problem.solve(t, warm_start, {"inputs": network_inputs})
+        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+        solution = self._solve_network(t, warm_start, network_inputs)
         measurements = self._measurements(solution.values, states)
         return DAEPoint(
             time=float(t),
@@ -127,42 +206,219 @@ class DAEExecutionProblem:
 
     def rhs(self, t: float, x: np.ndarray, warm_start: WarmStart | None = None) -> np.ndarray:
         point = self.evaluate(t, x, warm_start)
+        name, value = _largest_abs(point.normalized_residuals)
+        self._emit_progress(
+            "progress",
+            t,
+            "integrating",
+            residual_name=name,
+            residual_value=value,
+        )
+        dx = self._raw_rhs_from_point(t, x, point)
+        self._apply_state_modes(dx, x)
+        return dx
+
+    def _raw_rhs_from_point(self, t: float, x: np.ndarray, point: DAEPoint) -> np.ndarray:
         dx = np.zeros_like(x, dtype=float)
         transient_state = self._transient_state_vector(x)
         transient_derivatives = self.transient_system.derivatives(t, transient_state, {**point.timings, **point.commands})
         for i, name in enumerate(self.transient_system.state_names()):
             if name in self._transient_state_indexes:
                 dx[self._transient_state_indexes[name]] = transient_derivatives[i]
-        self._component_derivatives(dx, point)
+        if self.reduced_cycle_provider is not None:
+            for name, value in self.reduced_cycle_provider.derivatives(
+                t,
+                point.states,
+                point.algebraics,
+                point.commands,
+                point.timings,
+            ).items():
+                index = self._state_index(name)
+                if index is not None:
+                    dx[index] = float(value)
+        else:
+            self._component_derivatives(dx, point)
         self._controller_derivatives(dx, point)
-        self._apply_state_modes(dx, x)
         return dx
 
     def integrate(self, sample_times: np.ndarray | None = None) -> DAEExecutionResult:
-        warm_start = WarmStart(self.Z0.copy())
+        self._emit_progress("setup", self.execution_plan.time_start_s, "building sample schedule", force=True)
         time_points = np.asarray(sample_times, dtype=float) if sample_times is not None else self._default_times()
         if time_points.size == 0:
             time_points = np.array([self.execution_plan.time_start_s], dtype=float)
-        if self.X0.size == 0:
-            X = np.zeros((time_points.size, 0), dtype=float)
-        elif time_points.size == 1 or self.execution_plan.time_end_s <= self.execution_plan.time_start_s:
-            X = self.X0.reshape(1, -1)
-        else:
-            sol = solve_ivp(
-                lambda t, x: self.rhs(t, x, warm_start),
-                (self.execution_plan.time_start_s, self.execution_plan.time_end_s),
-                self.X0,
-                t_eval=time_points,
-                method=self.execution_plan.integration.method,
-                rtol=self.execution_plan.integration.rtol,
-                atol=self.execution_plan.integration.atol,
-                max_step=self.execution_plan.integration.max_step or np.inf,
+        time_points = _unique_sorted_clipped(time_points, self.execution_plan.time_start_s, self.execution_plan.time_end_s)
+        segments = self.integration_segments(
+            time_points if self.execution_plan.integration.segment_at_samples else None
+        )
+        self._emit_progress(
+            "setup",
+            self.execution_plan.time_start_s,
+            f"{len(segments)} integration segment(s), {len(time_points)} output sample(s)",
+            force=True,
+        )
+        X = self._integrate_segments(time_points, segments)
+        self._emit_progress("progress", self.execution_plan.time_end_s, "evaluating output samples", force=True)
+        points = self._evaluate_points(time_points, X)
+        self._emit_progress("complete", self.execution_plan.time_end_s, "integration complete", force=True)
+        return self._result(time_points, X, points, segments)
+
+    def integration_segments(self, sample_times: np.ndarray | None = None) -> list[IntegrationSegment]:
+        breakpoints = self._integration_breakpoints(sample_times)
+        return [
+            IntegrationSegment(
+                float(breakpoints[i]),
+                float(breakpoints[i + 1]),
+                reason=self._segment_reason(float(breakpoints[i]), float(breakpoints[i + 1])),
             )
-            if not sol.success:
-                raise RuntimeError(f"DAE integration failed: {sol.message}")
-            X = sol.y.T
-        points = [self.evaluate(float(t), X[i], warm_start) for i, t in enumerate(time_points)]
-        return self._result(time_points, X, points)
+            for i in range(len(breakpoints) - 1)
+            if breakpoints[i + 1] > breakpoints[i]
+        ] or [IntegrationSegment(self.execution_plan.time_start_s, self.execution_plan.time_end_s)]
+
+    def _segment_reason(self, start: float, end: float) -> str:
+        for phase in self.execution_plan.phases:
+            phase_start = float(phase.start_s)
+            phase_end = float(phase.end_s)
+            if (
+                str(phase.name)
+                and np.isclose(start, phase_start, rtol=0.0, atol=1.0e-12)
+                and np.isclose(end, phase_end, rtol=0.0, atol=1.0e-12)
+            ):
+                return f"phase:{phase.name}"
+        for phase in self.execution_plan.phases:
+            phase_start = float(phase.start_s)
+            phase_end = float(phase.end_s)
+            if str(phase.name) and start >= phase_start - 1.0e-12 and end <= phase_end + 1.0e-12:
+                return f"phase:{phase.name}:scheduled_breakpoint"
+        return "scheduled_breakpoint"
+
+    def _integration_breakpoints(self, sample_times: np.ndarray | None = None) -> list[float]:
+        start = float(self.execution_plan.time_start_s)
+        end = float(self.execution_plan.time_end_s)
+        points = {start, end}
+        for phase in self.execution_plan.phases:
+            points.add(float(phase.start_s))
+            points.add(float(phase.end_s))
+        for point in collect_config_breakpoints(
+            self.loaded.boundary_conditions,
+            self.loaded.timings,
+            self.loaded.operating_conditions,
+            t_start=start,
+            t_end=end,
+        ):
+            points.add(float(point))
+        if self._controller_period_s is not None and self.execution_plan.integration.segment_at_controller_samples:
+            k0 = int(np.ceil(start / self._controller_period_s))
+            k1 = int(np.floor(end / self._controller_period_s))
+            for k in range(k0, k1 + 1):
+                points.add(float(k * self._controller_period_s))
+        if sample_times is not None:
+            for point in sample_times:
+                if start <= float(point) <= end:
+                    points.add(float(point))
+        return sorted(point for point in points if start <= point <= end)
+
+    def _integrate_segments(self, time_points: np.ndarray, segments: list[IntegrationSegment]) -> np.ndarray:
+        if self.X0.size == 0:
+            return np.zeros((time_points.size, 0), dtype=float)
+        if time_points.size == 1 or self.execution_plan.time_end_s <= self.execution_plan.time_start_s:
+            return self.X0.reshape(1, -1)
+
+        rows: dict[float, np.ndarray] = {}
+        current_x = self.X0.copy()
+        current_z = self.Z0.copy()
+        if np.any(np.isclose(time_points, self.execution_plan.time_start_s, rtol=0.0, atol=1.0e-12)):
+            rows[float(self.execution_plan.time_start_s)] = current_x.copy()
+
+        for segment in segments:
+            segment_start = float(segment.start_s)
+            segment_end = float(segment.end_s)
+            self._emit_progress("segment", segment_start, f"starting {segment.reason}", force=True)
+            segment_times = [
+                float(t)
+                for t in time_points
+                if segment_start < float(t) <= segment_end + 1.0e-12
+            ]
+            eval_times = _unique_sorted_clipped(
+                np.asarray([*segment_times, segment_end], dtype=float),
+                segment_start,
+                segment_end,
+            )
+            if segment_end <= segment_start:
+                continue
+            if eval_times.size == 0:
+                eval_times = np.asarray([segment_end], dtype=float)
+            z_guess = current_z.copy()
+            if self.execution_plan.integration.method.lower() in {"fixed_rk4", "rk4_fixed"}:
+                fixed = self._integrate_fixed_rk4(segment_start, segment_end, current_x, eval_times, z_guess)
+                for t_value, x_value in fixed.items():
+                    if any(np.isclose(t_value, requested, rtol=0.0, atol=1.0e-12) for requested in segment_times):
+                        rows[float(t_value)] = x_value.copy()
+                current_x = fixed[float(eval_times[-1])].copy()
+            else:
+                sol = solve_ivp(
+                    lambda t, x: self.rhs(t, x, z_guess.copy()),
+                    (segment_start, segment_end),
+                    current_x,
+                    t_eval=eval_times,
+                    method=self.execution_plan.integration.method,
+                    rtol=self.execution_plan.integration.rtol,
+                    atol=self.execution_plan.integration.atol,
+                    max_step=self.execution_plan.integration.max_step or np.inf,
+                )
+                if not sol.success:
+                    raise RuntimeError(f"DAE integration failed in segment {segment_start:g}-{segment_end:g}: {sol.message}")
+                for index, t_value in enumerate(sol.t):
+                    if any(np.isclose(t_value, requested, rtol=0.0, atol=1.0e-12) for requested in segment_times):
+                        rows[float(t_value)] = sol.y[:, index].copy()
+                current_x = sol.y[:, -1].copy()
+            current_x, current_z, end_point = self._correct_segment_endpoint(segment_start, segment_end, current_x, current_z)
+            current_z = np.asarray([end_point.algebraics.get(name, current_z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
+            largest_name, largest_value = _largest_abs(end_point.normalized_residuals)
+            self._emit_progress(
+                "progress",
+                segment_end,
+                f"completed {segment.reason}",
+                residual_name=largest_name,
+                residual_value=largest_value,
+                force=True,
+            )
+
+        return np.vstack([rows.get(float(t), current_x.copy()) for t in time_points])
+
+    def _integrate_fixed_rk4(
+        self,
+        start: float,
+        end: float,
+        x0: np.ndarray,
+        eval_times: np.ndarray,
+        z_guess: np.ndarray,
+    ) -> dict[float, np.ndarray]:
+        max_step = self.execution_plan.integration.max_step or max(end - start, 1.0e-6)
+        output: dict[float, np.ndarray] = {}
+        x = np.asarray(x0, dtype=float).copy()
+        current = float(start)
+        for target in eval_times:
+            target = float(target)
+            while current < target - 1.0e-12:
+                step = min(float(max_step), target - current)
+                k1 = self.rhs(current, x, z_guess.copy())
+                k2 = self.rhs(current + 0.5 * step, x + 0.5 * step * k1, z_guess.copy())
+                k3 = self.rhs(current + 0.5 * step, x + 0.5 * step * k2, z_guess.copy())
+                k4 = self.rhs(current + step, x + step * k3, z_guess.copy())
+                x = x + (step / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+                current += step
+            output[target] = x.copy()
+        return output
+
+    def _evaluate_points(self, time_points: np.ndarray, X: np.ndarray) -> list[DAEPoint]:
+        z_guess = self.Z0.copy()
+        points: list[DAEPoint] = []
+        for i, t in enumerate(time_points):
+            point = self.evaluate(float(t), X[i], z_guess.copy())
+            z_guess = np.asarray([point.algebraics.get(name, z_guess[j]) for j, name in enumerate(self.algebraic_names)], dtype=float)
+            self._add_state_mode_residuals(point, X[i])
+            points.append(point)
+        return points
 
     def _state_dict(self, x: np.ndarray) -> dict[str, float]:
         values = {name: float(x[i]) for i, name in enumerate(self.state_names)}
@@ -180,6 +436,7 @@ class DAEExecutionProblem:
 
     def _network_inputs(
         self,
+        t: float,
         states: Mapping[str, float],
         targets: Mapping[str, Any],
         boundaries: Mapping[str, Any],
@@ -197,6 +454,7 @@ class DAEExecutionProblem:
         values.update(transient_sources)
         values.update({f"targets.{key}": value for key, value in targets.items()})
         values.update({f"target.{key}": value for key, value in targets.items()})
+        values["time"] = float(t)
         return values
 
     def _evaluate_controllers(
@@ -347,71 +605,74 @@ class DAEExecutionProblem:
                     dx[index] = np.sign(error) * min(abs(error), abs(rate))
 
     def _component_derivatives(self, dx: np.ndarray, point: DAEPoint) -> None:
-        values = {**point.states, **point.algebraics, **point.measurements}
+        context = DerivativeEvaluationContext(
+            states=point.states,
+            algebraics=point.algebraics,
+            measurements=point.measurements,
+            inputs={
+                **point.commands,
+                **point.targets,
+                **point.boundaries,
+                **point.timings,
+            },
+            shaft_couplings={
+                key: {bucket: tuple(values) for bucket, values in coupling.items()}
+                for key, coupling in self._shaft_couplings.items()
+            },
+        )
         for component in self.loaded.engine.components.values():
-            if component.type == "Pipe":
-                self._pipe_derivative(dx, component.name, component.parameters, point.states, values)
-            elif component.type in {"CombustionChamber", "Preburner"}:
-                self._finite_volume_derivative(dx, component.name, component.parameters, values)
-            elif component.type == "Rotor":
-                self._rotor_derivative(dx, component.name, component.parameters, values)
-
-    def _pipe_derivative(
-        self,
-        dx: np.ndarray,
-        name: str,
-        params: Mapping[str, Any],
-        states: Mapping[str, float],
-        values: Mapping[str, float],
-    ) -> None:
-        index = self._state_index(f"{name}.mdot")
-        if index is None:
-            return
-        tau = max(float(params.get("time_constant", params.get("tau", 0.0))), 0.0)
-        target = float(values.get(f"{name}.mdot", values.get(f"{name}.mdot_steady", values.get(f"{name}.inlet.mdot", 0.0))))
-        current = float(states.get(f"{name}.mdot", self.X0[index] if index < self.X0.size else 0.0))
-        dx[index] = 0.0 if tau <= 0.0 else (target - current) / tau
-
-    def _finite_volume_derivative(
-        self,
-        dx: np.ndarray,
-        name: str,
-        params: Mapping[str, Any],
-        values: Mapping[str, float],
-    ) -> None:
-        index = self._state_index(f"{name}.P")
-        if index is None:
-            return
-        volume = max(float(params.get("volume", 0.0)), 1.0e-12)
-        gas_r = float(params.get("gas_R", 287.0))
-        temperature = float(values.get(f"{name}.T", params.get("T_adiabatic", params.get("initial_T", 300.0))))
-        mdot_in = _sum_component_ports(values, name, ("fuel_inlet", "ox_inlet", "lox_inlet", "inlet"))
-        mdot_out = _sum_component_ports(values, name, ("outlet",))
-        dx[index] = gas_r * temperature / volume * (mdot_in - mdot_out)
-
-    def _rotor_derivative(
-        self,
-        dx: np.ndarray,
-        name: str,
-        params: Mapping[str, Any],
-        values: Mapping[str, float],
-    ) -> None:
-        index = self._state_index(f"{name}.omega")
-        if index is None:
-            return
-        inertia = max(float(params.get("moment_of_inertia", params.get("inertia", 1.0))), 1.0e-12)
-        omega = float(values.get(f"{name}.omega", values.get(f"{name}.shaft.omega", 0.0)))
-        omega_abs = max(abs(omega), 1.0)
-        drive_power = sum(_turbine_power(component, values) for component in self._shaft_couplings.get(name, {}).get("turbines", ()))
-        load_power = sum(_pump_power(self.loaded.engine.components[component], values) for component in self._shaft_couplings.get(name, {}).get("pumps", ()))
-        friction = float(params.get("friction_coeff", 0.0))
-        dx[index] = ((drive_power - load_power) / omega_abs - friction * omega) / inertia
+            contract = component_derivative_contract(component)
+            if contract is None:
+                continue
+            for path, derivative in contract.derivatives(component, context).items():
+                index = self._state_index(path)
+                if index is not None:
+                    dx[index] = float(derivative)
 
     def _state_index(self, name: str) -> int | None:
         try:
             return self.state_names.index(name)
         except ValueError:
             return None
+
+    def _apply_initial_state_overrides(self, overrides: Mapping[str, float]) -> None:
+        for name, value in overrides.items():
+            if name in self.state_names:
+                self.X0[self.state_names.index(name)] = float(value)
+            else:
+                self.state_names.append(str(name))
+                self.X0 = np.concatenate((self.X0, np.asarray([float(value)], dtype=float)))
+
+    def _apply_initial_algebraic_overrides(self) -> None:
+        overrides = self.loaded.analysis_config.analysis.get("initial_algebraic", {})
+        if not isinstance(overrides, Mapping):
+            return
+        for name, value in overrides.items():
+            if name in self.algebraic_names and _is_number(value):
+                self.Z0[self.algebraic_names.index(str(name))] = float(value)
+
+    def _correct_segment_endpoint(
+        self,
+        start: float,
+        end: float,
+        x: np.ndarray,
+        z: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, DAEPoint]:
+        point = self.evaluate(end, x, z.copy())
+        if self.solve_policy.corrector not in {"endpoint", "backward_euler"} or end <= start:
+            return x, np.asarray([point.algebraics.get(name, z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float), point
+        dt = float(end - start)
+        corrected_x = np.asarray(x, dtype=float).copy()
+        corrected_z = np.asarray([point.algebraics.get(name, z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
+        for _ in range(max(self.solve_policy.corrector_iterations, 1)):
+            point = self.evaluate(end, corrected_x, corrected_z.copy())
+            rhs = self._raw_rhs_from_point(end, corrected_x, point)
+            self._apply_state_modes(rhs, corrected_x)
+            corrected_x = np.asarray(x, dtype=float) + dt * rhs
+            corrected_z = np.asarray([point.algebraics.get(name, corrected_z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
+        point = self.evaluate(end, corrected_x, corrected_z.copy())
+        corrected_z = np.asarray([point.algebraics.get(name, corrected_z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
+        return corrected_x, corrected_z, point
 
     def _current_phase(self, t: float) -> str | None:
         for phase in self.execution_plan.phases:
@@ -432,7 +693,55 @@ class DAEExecutionProblem:
             if mode.mode in {"inactive", "fixed", "steady_state"}:
                 dx[index] = 0.0
 
+    def _emit_progress(
+        self,
+        kind: str,
+        t: float,
+        message: str,
+        *,
+        residual_name: str | None = None,
+        residual_value: float | None = None,
+        force: bool = False,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        start = float(self.execution_plan.time_start_s)
+        end = float(self.execution_plan.time_end_s)
+        percent = 100.0 if end <= start else 100.0 * (float(t) - start) / max(end - start, 1.0e-30)
+        percent = min(max(percent, 0.0), 100.0)
+        if not force and kind == "progress" and percent < self._last_progress_percent + 0.25:
+            return
+        if kind == "progress":
+            self._last_progress_percent = percent
+        self.progress_callback(
+            SolverProgressEvent(
+                kind=kind,
+                message=message,
+                time_s=float(t),
+                percent=percent,
+                phase=self._current_phase(float(t)),
+                residual_name=residual_name,
+                residual_value=residual_value,
+            )
+        )
+
+    def _add_state_mode_residuals(self, point: DAEPoint, x: np.ndarray) -> None:
+        raw_dx = self._raw_rhs_from_point(point.time, x, point)
+        for name, mode in self.execution_plan.state_modes.items():
+            if mode.mode != "steady_state" or name not in self.state_names:
+                continue
+            index = self.state_names.index(name)
+            residual_name = f"state_modes.{name}.steady_state_residual"
+            point.residuals[residual_name] = float(raw_dx[index])
+            point.normalized_residuals[residual_name] = float(raw_dx[index])
+
     def _measurements(self, algebraics: Mapping[str, float], states: Mapping[str, float]) -> dict[str, float]:
+        if self.reduced_cycle_provider is not None:
+            return {
+                key: float(value)
+                for key, value in self.reduced_cycle_provider.measurements(states, algebraics).items()
+                if _is_number(value)
+            }
         measurements = {**states, **algebraics}
         measurements.setdefault("mdot_total", float(algebraics.get("mdot.total", algebraics.get("nozzle.mdot", 0.0))))
         if "chamber.OF" in algebraics:
@@ -468,7 +777,13 @@ class DAEExecutionProblem:
             return np.array([start], dtype=float)
         return np.linspace(start, end, 101)
 
-    def _result(self, time: np.ndarray, X: np.ndarray, points: list[DAEPoint]) -> DAEExecutionResult:
+    def _result(
+        self,
+        time: np.ndarray,
+        X: np.ndarray,
+        points: list[DAEPoint],
+        segments: list[IntegrationSegment],
+    ) -> DAEExecutionResult:
         Z = np.vstack([[point.algebraics.get(name, np.nan) for name in self.algebraic_names] for point in points])
         return DAEExecutionResult(
             time=time,
@@ -483,6 +798,56 @@ class DAEExecutionProblem:
             boundary_history=_history(points, "boundaries"),
             measurement_history=_history(points, "measurements"),
             points=points,
+            segments=segments,
+        )
+
+    def _solve_network(
+        self,
+        t: float,
+        warm_start: WarmStart | np.ndarray | None,
+        network_inputs: Mapping[str, Any],
+    ):
+        if self.reduced_cycle_provider is not None:
+            return self.reduced_cycle_provider.solve_algebraics(t, {"inputs": network_inputs})
+        warm_start = self._precondition_warm_start(t, warm_start, network_inputs)
+        if self.solve_policy.checked:
+            return self.network_problem.solve_checked(
+                t,
+                warm_start,
+                {"inputs": network_inputs},
+                residual_tolerance=self.solve_policy.residual_tolerance,
+                max_nfev=self.solve_policy.max_nfev,
+            )
+        return self.network_problem.solve_limited(t, warm_start, {"inputs": network_inputs}, max_nfev=self.solve_policy.max_nfev)
+
+    def _precondition_warm_start(
+        self,
+        t: float,
+        warm_start: WarmStart | np.ndarray | None,
+        network_inputs: Mapping[str, Any],
+    ) -> WarmStart | np.ndarray | None:
+        if self.solve_policy.preconditioner in {"none", "off", "false"} or self.reduced_cycle_provider is not None:
+            return warm_start
+        if isinstance(warm_start, WarmStart):
+            warm_start.z = self._precondition_guess(t, warm_start.z, network_inputs)
+            return warm_start
+        base = self.Z0 if warm_start is None else np.asarray(warm_start, dtype=float)
+        return self._precondition_guess(t, base, network_inputs)
+
+    def _precondition_guess(
+        self,
+        t: float,
+        z: np.ndarray,
+        network_inputs: Mapping[str, Any],
+    ) -> np.ndarray:
+        if self.solve_policy.preconditioner in {"none", "off", "false"} or self.reduced_cycle_provider is not None:
+            return np.asarray(z, dtype=float)
+        return precondition_algebraic_guess(
+            self.loaded,
+            self.network_problem,
+            t,
+            np.asarray(z, dtype=float),
+            {"inputs": network_inputs},
         )
 
 
@@ -495,6 +860,41 @@ def _history(points: list[DAEPoint], attr: str) -> dict[str, np.ndarray]:
         key: np.asarray([float(getattr(point, attr).get(key, np.nan)) for point in points], dtype=float)
         for key in sorted(keys)
     }
+
+
+def _dae_solve_policy(loaded: LoadedAnalysisConfig, execution_plan: ExecutionPlan) -> DAESolvePolicy:
+    analysis = loaded.analysis_config.analysis
+    raw = analysis.get("solve_policy", {})
+    if not isinstance(raw, Mapping):
+        raw = {}
+    diagnostic_default = execution_plan.analysis_type == "port_network_diagnostics"
+    allow_non_square = bool(raw.get("allow_non_square", raw.get("diagnostic", diagnostic_default)))
+    checked = bool(raw.get("checked", not diagnostic_default or not allow_non_square))
+    return DAESolvePolicy(
+        allow_non_square=allow_non_square,
+        checked=checked,
+        residual_tolerance=float(raw.get("residual_tolerance", raw.get("tolerance", 1.0e-8))),
+        max_nfev=int(raw["max_nfev"]) if raw.get("max_nfev") is not None else None,
+        strict_sources=bool(raw.get("strict_sources", raw.get("production", False))),
+        corrector=str(raw.get("corrector", raw.get("corrector_mode", "none"))),
+        corrector_iterations=int(raw.get("corrector_iterations", raw.get("iterations", 1))),
+        preconditioner=str(raw.get("preconditioner", "none")).lower(),
+    )
+
+
+def _unique_sorted_clipped(values: np.ndarray, start: float, end: float) -> np.ndarray:
+    clipped = sorted({float(value) for value in values if start - 1.0e-12 <= float(value) <= end + 1.0e-12})
+    if not clipped:
+        return np.zeros(0, dtype=float)
+    result: list[float] = []
+    for value in clipped:
+        if value < start and np.isclose(value, start, rtol=0.0, atol=1.0e-12):
+            value = start
+        if value > end and np.isclose(value, end, rtol=0.0, atol=1.0e-12):
+            value = end
+        if not result or not np.isclose(value, result[-1], rtol=0.0, atol=1.0e-12):
+            result.append(float(value))
+    return np.asarray(result, dtype=float)
 
 
 def _lookup_signal(
@@ -554,6 +954,62 @@ def _shaft_couplings(components: Mapping[str, Any], connections: list[Any]) -> d
     return couplings
 
 
+def _validate_strict_full_port_sources(loaded: LoadedAnalysisConfig) -> None:
+    incoming = {(connection.target, connection.domain) for connection in loaded.engine.connections}
+    outgoing = {(connection.source, connection.domain) for connection in loaded.engine.connections}
+    boundary_values = evaluate_boundary_conditions(loaded.boundary_conditions, 0.0) if loaded.boundary_conditions is not None else {}
+    missing: list[str] = []
+    for component in loaded.engine.components.values():
+        spec = component_spec(component.type)
+        for port_name, domain in spec.ports.items():
+            if domain not in {"fluid_in", "fluid_out"}:
+                continue
+            endpoint = f"{component.name}.{port_name}"
+            has_connection = (endpoint, "fluid") in incoming if domain == "fluid_in" else (endpoint, "fluid") in outgoing
+            has_boundary = any(
+                path == endpoint or path.startswith(f"{endpoint}.")
+                for path in boundary_values
+            )
+            if has_connection or has_boundary:
+                continue
+            if _is_optional_alias_port(component.type, port_name, outgoing, incoming, boundary_values, component.name, domain):
+                continue
+            if component.type == "BoundarySource" and domain == "fluid_out":
+                continue
+            if component.type == "BoundarySink" and domain == "fluid_in":
+                continue
+            missing.append(endpoint)
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise RuntimeError(f"strict full-port source validation failed; unconnected fluid endpoint(s): {joined}")
+
+
+def _is_optional_alias_port(
+    component_type: str,
+    port_name: str,
+    outgoing: set[tuple[str, str]],
+    incoming: set[tuple[str, str]],
+    boundary_values: Mapping[str, Any],
+    component_name: str,
+    domain: str,
+) -> bool:
+    if component_type not in {"CombustionChamber", "Preburner", "GasGenerator"} or domain != "fluid_in":
+        return False
+    aliases = {
+        "lox_inlet": ("ox_inlet",),
+        "ox_inlet": ("lox_inlet",),
+    }.get(port_name)
+    if aliases is None:
+        return False
+    for alias in aliases:
+        endpoint = f"{component_name}.{alias}"
+        if (endpoint, "fluid") in incoming or (endpoint, "fluid") in outgoing:
+            return True
+        if any(path == endpoint or path.startswith(f"{endpoint}.") for path in boundary_values):
+            return True
+    return False
+
+
 def _pump_power(component: Any, values: Mapping[str, float]) -> float:
     name = component.name
     if f"{name}.power" in values:
@@ -602,3 +1058,10 @@ def _first_numeric(values: Mapping[str, float], paths: tuple[str, ...], default:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float, np.floating))
+
+
+def _largest_abs(values: Mapping[str, float]) -> tuple[str, float]:
+    if not values:
+        return "", 0.0
+    name = max(values, key=lambda key: abs(float(values[key])))
+    return name, float(values[name])

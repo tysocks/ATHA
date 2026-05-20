@@ -15,11 +15,9 @@ class RunArtifacts:
     residuals_json: Path | None = None
     linearization: Path | None = None
     acceptance_report: Path | None = None
-    monte_carlo_file: Path | None = None
-    histogram: Path | None = None
-    sweep_plot: Path | None = None
-    statistics: Path | None = None
-    sensitivity: Path | None = None
+    regression_report: Path | None = None
+    parity_report: Path | None = None
+    parity_delta_csv: Path | None = None
 
     @classmethod
     def from_summary(cls, summary: Any) -> "RunArtifacts":
@@ -32,11 +30,9 @@ class RunArtifacts:
             residuals_json=getattr(summary, "residuals_json", None),
             linearization=getattr(summary, "linearization", None),
             acceptance_report=getattr(summary, "acceptance_report", None),
-            monte_carlo_file=getattr(summary, "monte_carlo_file", None),
-            histogram=getattr(summary, "histogram", None),
-            sweep_plot=getattr(summary, "sweep_plot", None),
-            statistics=getattr(summary, "statistics", None),
-            sensitivity=getattr(summary, "sensitivity", None),
+            regression_report=getattr(summary, "regression_report", None),
+            parity_report=getattr(summary, "parity_report", None),
+            parity_delta_csv=getattr(summary, "parity_delta_csv", None),
         )
 
     def as_dict(self) -> dict[str, Path]:

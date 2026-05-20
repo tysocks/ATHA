@@ -8,15 +8,20 @@ from typing import Any, Dict, Mapping
 import numpy as np
 
 from atha.config.schema import BoundaryConditionsConfig, ConfigError, OperatingConditionsConfig
+from atha.thermo.properties import flatten_fluid_state, fluid_state_from_spec, is_fluid_state_spec
 
 
 def evaluate_boundary_conditions(config: BoundaryConditionsConfig, t: float) -> Dict[str, Any]:
     """Evaluate boundary-condition values at time ``t``."""
 
-    return {
-        name: _evaluate_value_or_schedule(spec, t, f"boundary condition '{name}'")
-        for name, spec in config.conditions.items()
-    }
+    values: Dict[str, Any] = {}
+    for name, spec in config.conditions.items():
+        evaluated = _evaluate_value_or_schedule(spec, t, f"boundary condition '{name}'")
+        if is_fluid_state_spec(evaluated):
+            values.update(flatten_fluid_state(name, fluid_state_from_spec(evaluated)))
+        else:
+            values[name] = evaluated
+    return values
 
 
 def evaluate_operating_targets(config: OperatingConditionsConfig, t: float) -> Dict[str, Any]:
@@ -153,6 +158,11 @@ def collect_config_breakpoints(*configs: Any, t_start: float, t_end: float) -> l
 
 def _evaluate_value_or_schedule(spec: Any, t: float, label: str) -> Any:
     if isinstance(spec, Mapping):
+        if is_fluid_state_spec(spec):
+            return {
+                key: _evaluate_value_or_schedule(value, t, f"{label}.{key}")
+                for key, value in spec.items()
+            }
         if "schedule" in spec:
             return evaluate_schedule(spec["schedule"], t)
         if "value" in spec:

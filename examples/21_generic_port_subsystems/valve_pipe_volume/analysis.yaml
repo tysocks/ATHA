@@ -1,0 +1,42 @@
+name: valve_pipe_volume_generic_port
+engine: ../generic_engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+analysis:
+  type: profile
+  time: {start_s: 0.0, end_s: 3.0}
+  solve_policy: {residual_tolerance: 1.0e-4}
+  trim: {enabled: true}
+  output:
+    csv: valve_pipe_volume.csv
+    plot: valve_pipe_volume.png
+    diagnostics: valve_pipe_volume.profile.json
+  balances:
+    mdot_total:
+      residual: {expression: mdot.total - targets.mdot_total, scale: 5.0}
+      variable: mdot.total
+      bounds: [0.0, 10.0]
+    of_ratio:
+      residual: {expression: chamber.OF - targets.OF, scale: 4.0}
+      variable: chamber.OF
+      bounds: [1.0, 6.0]
+    valve_command:
+      residual: {expression: valve.command - 0.75, scale: 1.0}
+      variable: valve.command
+      bounds: [0.0, 1.0]
+    valve_position:
+      residual: {expression: valve.position - valve.command, scale: 1.0}
+      variable: valve.position
+      bounds: [0.0, 1.0]
+    pipe_mdot:
+      residual: {expression: pipe.mdot - mdot.total, scale: 5.0}
+      variable: pipe.mdot
+      bounds: [0.0, 10.0]
+    volume_pressure:
+      residual: {expression: volume.P - (100000.0 + 400000.0 * time / 3.0), scale: 100000000.0}
+      variable: volume.P
+      bounds: [100000.0, 1000000.0]
+  acceptance:
+    report: valve_pipe_volume.acceptance.json
+    case: valve_pipe_volume_generic_port
+    tolerances: {final_mdot_rel: 0.05, final_of_abs: 0.05, max_normalized_residual: 1.0e-4}

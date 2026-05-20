@@ -1,0 +1,15 @@
+name: injector_chamber_nozzle_telemetry
+sample_rate_hz: 2
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
+  - {alias: MDOT_TOTAL, source: mdot.total, units: kg/s}
+  - {alias: OF, source: chamber.OF}
+  - {alias: INJECTOR_MDOT, source: injector.mdot, units: kg/s}
+  - {alias: PC, source: chamber.P, units: Pa}
+  - {alias: NOZZLE_MDOT, source: nozzle.mdot, units: kg/s}
+  - {alias: THRUST, source: nozzle.thrust, units: N}
+exports: {csv: true, plot: true}
+plots:
+  - {title: Flow, x: TIME, y: [TARGET_MDOT_TOTAL, MDOT_TOTAL], ylabel: Mass flow}
+  - {title: Thrust, x: TIME, y: [THRUST], ylabel: Thrust}

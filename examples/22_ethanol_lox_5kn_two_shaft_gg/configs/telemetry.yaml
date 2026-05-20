@@ -1,0 +1,58 @@
+name: ethanol_lox_5kn_two_shaft_gg_telemetry
+sample_rate_hz: 50
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
+  - {alias: TARGET_OF, source: target.OF}
+  - {alias: MDOT_TOTAL, source: mdot.total, units: kg/s}
+  - {alias: OF, source: chamber.OF}
+  - {alias: LOX_PUMP_MDOT, source: lox_pump.inlet.mdot, units: kg/s}
+  - {alias: FUEL_PUMP_MDOT, source: fuel_pump.inlet.mdot, units: kg/s}
+  - {alias: LOX_PUMP_DP, source: lox_pump.delta_P, units: MPa}
+  - {alias: FUEL_PUMP_DP, source: fuel_pump.delta_P, units: MPa}
+  - {alias: LOX_GENERATOR_VALVE_COMMAND, source: lox_generator_valve.command}
+  - {alias: FUEL_GENERATOR_VALVE_COMMAND, source: fuel_generator_valve.command}
+  - {alias: LOX_GENERATOR_VALVE_POSITION, source: lox_generator_valve.position}
+  - {alias: FUEL_GENERATOR_VALVE_POSITION, source: fuel_generator_valve.position}
+  - {alias: MAIN_LOX_VALVE_POSITION, source: main_lox_valve.position}
+  - {alias: MAIN_FUEL_VALVE_POSITION, source: main_fuel_valve.position}
+  - {alias: LOX_PID_ERROR, source: controller.lox_generator_mdot_pid.error}
+  - {alias: LOX_PID_INTEGRAL, source: controller.lox_generator_mdot_pid.integral}
+  - {alias: LOX_PID_DERIVATIVE, source: controller.lox_generator_mdot_pid.derivative}
+  - {alias: FUEL_PID_ERROR, source: controller.fuel_generator_of_pid.error}
+  - {alias: FUEL_PID_INTEGRAL, source: controller.fuel_generator_of_pid.integral}
+  - {alias: FUEL_PID_DERIVATIVE, source: controller.fuel_generator_of_pid.derivative}
+  - {alias: GENERATOR_P, source: generator.P, units: bar}
+  - {alias: PC, source: chamber.P, units: bar}
+  - {alias: GENERATOR_MDOT, source: generator.mdot, units: kg/s}
+  - {alias: LOX_SHAFT_RPM, source: lox_shaft.rpm, units: rpm}
+  - {alias: FUEL_SHAFT_RPM, source: fuel_shaft.rpm, units: rpm}
+  - {alias: THRUST, source: nozzle.thrust, units: N}
+exports:
+  csv: true
+  plot: true
+plots:
+  - title: Thrust
+    x: TIME
+    y: [THRUST]
+    ylabel: Thrust [N]
+  - title: Target Tracking
+    x: TIME
+    y: [TARGET_MDOT_TOTAL, MDOT_TOTAL]
+    ylabel: Mass flow [kg/s]
+  - title: Mixture Ratio
+    x: TIME
+    y: [TARGET_OF, OF]
+    ylabel: OF [-]
+  - title: Valve Positions
+    x: TIME
+    y: [MAIN_LOX_VALVE_POSITION, MAIN_FUEL_VALVE_POSITION, LOX_GENERATOR_VALVE_POSITION, FUEL_GENERATOR_VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Shaft Speeds
+    x: TIME
+    y: [LOX_SHAFT_RPM, FUEL_SHAFT_RPM]
+    ylabel: Speed [rpm]
+  - title: PID Integrals
+    x: TIME
+    y: [LOX_PID_INTEGRAL, FUEL_PID_INTEGRAL]
+    ylabel: Integral

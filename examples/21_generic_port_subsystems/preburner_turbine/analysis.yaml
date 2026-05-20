@@ -1,0 +1,39 @@
+name: preburner_turbine_generic_port
+engine: ../generic_engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+analysis:
+  type: profile
+  time: {start_s: 0.0, end_s: 3.0}
+  solve_policy: {residual_tolerance: 1.0e-6}
+  trim: {enabled: true}
+  output:
+    csv: preburner_turbine.csv
+    plot: preburner_turbine.png
+    diagnostics: preburner_turbine.profile.json
+  balances:
+    mdot_total:
+      residual: {expression: mdot.total - targets.mdot_total, scale: 5.0}
+      variable: mdot.total
+    of_ratio:
+      residual: {expression: chamber.OF - targets.OF, scale: 4.0}
+      variable: chamber.OF
+    preburner_pressure:
+      residual: {expression: preburner.P - 6500000.0, scale: 7000000.0}
+      variable: preburner.P
+    preburner_temperature:
+      residual: {expression: preburner.T - 1000.0, scale: 2000.0}
+      variable: preburner.T
+    preburner_mdot:
+      residual: {expression: preburner.mdot - mdot.total, scale: 5.0}
+      variable: preburner.mdot
+    turbine_power:
+      residual: {expression: turbine.power - 180000.0, scale: 500000.0}
+      variable: turbine.power
+    turbine_pr:
+      residual: {expression: turbine.pressure_ratio - 2.2, scale: 5.0}
+      variable: turbine.pressure_ratio
+  acceptance:
+    report: preburner_turbine.acceptance.json
+    case: preburner_turbine_generic_port
+    tolerances: {final_mdot_rel: 0.05, final_of_abs: 0.05, max_normalized_residual: 1.0e-6}

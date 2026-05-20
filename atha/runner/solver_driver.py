@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from atha.config.loader import LoadedAnalysisConfig
 from atha.config.schedules import collect_config_breakpoints
 from atha.runner.analysis_registry import AnalysisRegistry
 from atha.runner.context import AnalysisContext
+from atha.runner.progress import SolverProgressEvent
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class IntegrationOptions:
     rtol: float = 1.0e-7
     atol: float = 1.0e-6
     max_step: float | None = None
+    segment_at_samples: bool = False
+    segment_at_controller_samples: bool = True
     per_state: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
@@ -65,7 +68,14 @@ class SolverDriver:
     def __init__(self, registry: AnalysisRegistry) -> None:
         self.registry = registry
 
-    def run(self, loaded: LoadedAnalysisConfig, config_path: Path, output_dir: Path) -> SolverDriverResult:
+    def run(
+        self,
+        loaded: LoadedAnalysisConfig,
+        config_path: Path,
+        output_dir: Path,
+        *,
+        progress_callback: Callable[[SolverProgressEvent], None] | None = None,
+    ) -> SolverDriverResult:
         analysis_type = str(loaded.analysis_config.analysis.get("type", ""))
         spec = self.registry.get(analysis_type)
         execution_plan = self.build_execution_plan(loaded, analysis_type, spec.mode)
@@ -77,6 +87,7 @@ class SolverDriver:
             mode=spec.mode,
             execution_plan=execution_plan,
             registry=self.registry,
+            progress_callback=progress_callback,
         )
         summary = self.registry.run_context(context)
         if hasattr(summary, "__dict__"):
@@ -114,6 +125,8 @@ def _integration_options(loaded: LoadedAnalysisConfig) -> IntegrationOptions:
         rtol=float(integration_cfg.get("rtol", solver_cfg.get("rtol", 1.0e-7))),
         atol=float(integration_cfg.get("atol", solver_cfg.get("atol", 1.0e-6))),
         max_step=_optional_float(integration_cfg.get("max_step", solver_cfg.get("max_step"))),
+        segment_at_samples=bool(integration_cfg.get("segment_at_samples", False)),
+        segment_at_controller_samples=bool(integration_cfg.get("segment_at_controller_samples", True)),
         per_state={str(key): dict(value) for key, value in per_state.items()} if isinstance(per_state, dict) else {},
     )
 

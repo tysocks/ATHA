@@ -16,25 +16,10 @@ dependencies = [
     "matplotlib>=3.8",
     "PyYAML>=6.0",
     "h5py>=3.10",
-    "joblib>=1.3",
-    "SALib>=1.5",
 ]
 
 [project.scripts]
 atha-run = "atha.cli:main"
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov", "plotly>=5.0"]
-
 [tool.setuptools.packages.find]
 include = ["atha*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "fast: fast unit and smoke tests",
-    "integration: integration tests that exercise coupled models",
-    "acceptance: acceptance tests and validation gates",
-    "monte_carlo: stochastic or ensemble tests",
-    "slow: slow tests not intended for every edit cycle",
-]

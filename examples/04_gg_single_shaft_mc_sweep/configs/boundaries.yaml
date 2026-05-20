@@ -1,9 +1,0 @@
-name: gg_single_shaft_boundaries
-time_unit: s
-conditions:
-  lox_tank.outlet.P: {value: 4.0e5, units: Pa}
-  lox_tank.outlet.T: {value: 91.0, units: K}
-  fuel_tank.outlet.P: {value: 4.0e5, units: Pa}
-  fuel_tank.outlet.T: {value: 293.0, units: K}
-  nozzle.ambient.P: {value: 0.0, units: Pa}
-  shaft.omega_override: {value: 2303.834612632515, units: rad/s}

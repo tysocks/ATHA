@@ -10,9 +10,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="atha-run", description="Run an ATHA config folder or analysis YAML.")
     parser.add_argument("config", help="Config folder or analysis.yaml path")
     parser.add_argument("--output-dir", default="outputs", help="Directory for generated outputs")
+    parser.add_argument("--progress", dest="progress", action="store_true", default=None, help="Show live solver progress")
+    parser.add_argument("--no-progress", dest="progress", action="store_false", help="Disable live solver progress")
     args = parser.parse_args(argv)
 
-    result = run_config_folder(Path(args.config), output_dir=Path(args.output_dir))
+    result = run_config_folder(Path(args.config), output_dir=Path(args.output_dir), progress=args.progress)
     summary = result.require_summary()
     print(f"ATHA run complete: {result.name} ({result.analysis_type})")
     if result.csv is not None:
@@ -30,12 +32,17 @@ def main(argv: list[str] | None = None) -> int:
     if acceptance_report is not None:
         status = "PASS" if getattr(summary, "acceptance_passed", False) else "FAIL"
         print(f"Acceptance: {acceptance_report} ({status})")
-    monte_carlo_file = getattr(summary, "monte_carlo_file", None)
-    if monte_carlo_file is not None:
-        print(f"Monte Carlo: {monte_carlo_file}")
-    sweep_plot = getattr(summary, "sweep_plot", None)
-    if sweep_plot is not None:
-        print(f"Sweep plot: {sweep_plot}")
+    regression_report = getattr(summary, "regression_report", None)
+    if regression_report is not None:
+        status = "PASS" if getattr(summary, "regression_passed", False) else "FAIL"
+        print(f"Regression: {regression_report} ({status})")
+    parity_report = getattr(summary, "parity_report", None)
+    if parity_report is not None:
+        status = "PASS" if getattr(summary, "parity_passed", False) else "FAIL"
+        print(f"Parity: {parity_report} ({status})")
+    parity_delta_csv = getattr(summary, "parity_delta_csv", None)
+    if parity_delta_csv is not None:
+        print(f"Parity delta CSV: {parity_delta_csv}")
     plot = result.plot
     if plot is not None:
         print(f"Plot: {plot}")

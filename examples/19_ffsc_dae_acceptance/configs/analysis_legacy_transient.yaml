@@ -1,0 +1,77 @@
+name: ffsc_dae_acceptance_legacy_transient
+engine: engine.yaml
+maps:
+  lox_pump_affinity: maps/lox_pump_affinity.yaml
+  methane_pump_affinity: maps/methane_pump_affinity.yaml
+  lox_turbine_affinity: maps/lox_turbine_affinity.yaml
+  methane_turbine_affinity: maps/methane_turbine_affinity.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+controllers: controller.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  dae:
+    method: Radau
+    rtol: 1.0e-7
+    atol: 1.0e-6
+    max_step: 0.005
+    algebraic_tol: 1.0e-8
+    max_algebraic_iter: 30
+  steady_trim:
+    tol: 1.0e-8
+    max_iter: 200
+analysis:
+  type: ffsc_dae_transient
+  time:
+    start_s: 0.0
+    end_s: 30.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 3.0
+      - name: CLC
+        start_s: 3.0
+        end_s: 25.0
+      - name: shutdown
+        start_s: 25.0
+        end_s: 30.0
+  fluids:
+    oxidizer: Oxygen
+    fuel: Methane
+  combustion:
+    mechanism: gri30.yaml
+    fuel: CH4
+    oxidizer: O2
+    chamber_initial_X: H2O:0.60,CO2:0.25,CO:0.08,H2:0.07
+    gas_T: 3500.0
+  design:
+    thrust: 150000.0
+    chamber_pressure: 5.0e6
+    mdot_total: 40.0
+    OF: 3.2
+    mdot_lox: 30.48
+    mdot_methane: 9.52
+  initial_conditions:
+    lox_shaft.omega: 3350.0
+    methane_shaft.omega: 2825.0
+    chamber.P: 5.0e6
+    chamber.T: 3500.0
+    ox_preburner.P: 8.0e6
+    fuel_preburner.P: 8.0e6
+  output:
+    csv: ffsc_dae_acceptance_legacy_transient.csv
+    plot: ffsc_dae_acceptance_legacy_transient.png
+  acceptance:
+    description: Legacy reduced FFSC transient oracle retained for generic DAE parity work.
+    report: ffsc_dae_acceptance_legacy_transient.acceptance.json
+    evaluation_end_s: 24.99
+    tolerances:
+      final_mdot_rel: 0.35
+      final_thrust_rel: 0.35
+      final_of_abs: 3.0
+      mdot_tracking_rms_rel: 0.35
+      of_tracking_rms_abs: 1.75
+      min_shaft_speed_delta_rpm: 100.0
+      max_normalized_residual: 1.0e-6

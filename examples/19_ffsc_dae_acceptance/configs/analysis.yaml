@@ -12,18 +12,17 @@ transients: transients.yaml
 timings: timings.yaml
 telemetry: telemetry.yaml
 solver:
-  dae:
+  transient:
     method: Radau
     rtol: 1.0e-7
     atol: 1.0e-6
-    max_step: 0.005
-    algebraic_tol: 1.0e-8
-    max_algebraic_iter: 30
-  steady_trim:
-    tol: 1.0e-8
-    max_iter: 200
+    max_step: 0.05
 analysis:
-  type: ffsc_dae_transient
+  type: profile
+  reduced_cycle:
+    provider: ffsc_reduced
+  integration:
+    segment_at_controller_samples: false
   time:
     start_s: 0.0
     end_s: 30.0
@@ -63,6 +62,7 @@ analysis:
   output:
     csv: ffsc_dae_acceptance.csv
     plot: ffsc_dae_acceptance.png
+    diagnostics: ffsc_dae_acceptance.diagnostics.json
   linearization:
     enabled: true
     output: ffsc_dae_acceptance.linearization.json
@@ -70,9 +70,19 @@ analysis:
       state_default: 1.0e-6
       input_default: 1.0e-5
   acceptance:
-    description: Full DAE port solve acceptance model for connected FFSC cycle.
+    description: Generic DAE profile execution of the FFSC reduced-cycle transient oracle.
     report: ffsc_dae_acceptance.acceptance.json
+    case: ffsc_dae_acceptance_generic_profile
     evaluation_end_s: 24.99
+    shaft_paths: [lox_shaft.rpm, methane_shaft.rpm]
+    required_paths:
+      - mdot.total
+      - chamber.OF
+      - nozzle.thrust
+      - lox_pump.inlet.mdot
+      - methane_pump.inlet.mdot
+      - methane_crossover_valve.position
+      - lox_crossover_valve.position
     tolerances:
       final_mdot_rel: 0.35
       final_thrust_rel: 0.35

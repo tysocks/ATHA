@@ -1,6 +1,7 @@
 """YAML configuration schema and loading utilities."""
 
 from atha.config.loader import LoadedAnalysisConfig, load_analysis_config, load_config_folder
+from atha.config.balances import BalanceConfig, BalanceResidual, balance_configs, wrap_problem_with_balances
 from atha.config.controllers import (
     ControllerStateInfo,
     controller_execution_order,
@@ -59,6 +60,10 @@ __all__ = [
     "SUPPORTED_TRANSIENT_TYPES",
     "load_analysis_config",
     "load_config_folder",
+    "BalanceConfig",
+    "BalanceResidual",
+    "balance_configs",
+    "wrap_problem_with_balances",
     "build_performance_map",
     "build_performance_maps",
     "apply_path_overrides",

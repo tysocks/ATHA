@@ -17,6 +17,8 @@ class NetworkVariable:
     initial: float = 0.0
     owner: str = ""
     description: str = ""
+    lower: float | None = None
+    upper: float | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,14 @@ class NetworkProblem:
         self.variable_scales = np.array([max(abs(variable.scale), 1.0e-30) for variable in self.variables], dtype=float)
         self.residual_scales = np.array([max(abs(residual.scale), 1.0e-30) for residual in self.residual_definitions], dtype=float)
         self.initial_z = np.array([float(variable.initial) for variable in self.variables], dtype=float)
+        self.lower_bounds = np.array(
+            [-np.inf if variable.lower is None else float(variable.lower) for variable in self.variables],
+            dtype=float,
+        )
+        self.upper_bounds = np.array(
+            [np.inf if variable.upper is None else float(variable.upper) for variable in self.variables],
+            dtype=float,
+        )
 
     @property
     def n_algebraic(self) -> int:
@@ -160,6 +170,16 @@ class NetworkProblem:
         return np.array([float(evaluated.get(name, 0.0)) for name in self.residual_names], dtype=float)
 
     def solve(self, t: float, z0: np.ndarray | WarmStart | None, inputs: Mapping[str, Any]) -> NetworkSolution:
+        return self.solve_limited(t, z0, inputs)
+
+    def solve_limited(
+        self,
+        t: float,
+        z0: np.ndarray | WarmStart | None,
+        inputs: Mapping[str, Any],
+        *,
+        max_nfev: int | None = None,
+    ) -> NetworkSolution:
         guess = self._initial_guess(z0)
         if self.n_algebraic == 0 and len(self.residual_definitions) == 0:
             solution = NetworkSolution(
@@ -177,7 +197,12 @@ class NetworkProblem:
         def scaled_residual(z: np.ndarray) -> np.ndarray:
             return self.residual_vector(t, z, inputs) / self.residual_scales
 
-        if len(self.variables) == len(self.residual_definitions):
+        bounded = bool(np.any(np.isfinite(self.lower_bounds)) or np.any(np.isfinite(self.upper_bounds)))
+        if bounded:
+            success = False
+            message = "bounded network; using least-squares solve"
+            z = np.clip(guess, self.lower_bounds, self.upper_bounds)
+        elif len(self.variables) == len(self.residual_definitions):
             root_result = root(scaled_residual, guess, method="hybr")
             success = bool(root_result.success)
             message = str(root_result.message)
@@ -188,11 +213,14 @@ class NetworkProblem:
             z = guess
 
         if not success:
+            ls_guess = np.clip(guess, self.lower_bounds, self.upper_bounds)
             ls_result = least_squares(
                 scaled_residual,
-                guess,
+                ls_guess,
                 x_scale=self.variable_scales,
                 jac_sparsity=self.sparse_jacobian_hint,
+                bounds=(self.lower_bounds, self.upper_bounds),
+                max_nfev=max_nfev,
             )
             z = np.asarray(ls_result.x, dtype=float)
             success = bool(ls_result.success)
@@ -223,8 +251,9 @@ class NetworkProblem:
         inputs: Mapping[str, Any],
         *,
         residual_tolerance: float = 1.0e-8,
+        max_nfev: int | None = None,
     ) -> NetworkSolution:
-        solution = self.solve(t, z0, inputs)
+        solution = self.solve_limited(t, z0, inputs, max_nfev=max_nfev)
         _, residual = solution.max_normalized_residual
         if not solution.success or abs(residual) > residual_tolerance:
             raise NetworkSolveError(self.name, solution, residual_tolerance)

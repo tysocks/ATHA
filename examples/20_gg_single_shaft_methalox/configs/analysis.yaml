@@ -11,13 +11,17 @@ transients: transients.yaml
 timings: timings.yaml
 telemetry: telemetry.yaml
 solver:
-  dae:
+  transient:
     method: Radau
     rtol: 1.0e-7
     atol: 1.0e-6
-    max_step: 0.005
+    max_step: 0.05
 analysis:
-  type: gg_single_shaft_transient
+  type: profile
+  reduced_cycle:
+    provider: gg_single_shaft
+  integration:
+    segment_at_controller_samples: false
   time:
     start_s: 0.0
     end_s: 30.0
@@ -43,3 +47,48 @@ analysis:
   output:
     csv: gg_single_shaft_methalox.csv
     plot: gg_single_shaft_methalox.png
+    diagnostics: gg_single_shaft_methalox.diagnostics.json
+  acceptance:
+    report: gg_single_shaft_methalox.acceptance.json
+    case: gg_single_shaft_methalox_generic_profile
+    evaluation_end_s: 24.99
+    shaft_paths: [shaft.rpm]
+    required_paths:
+      - mdot.total
+      - chamber.OF
+      - nozzle.thrust
+      - lox_pump.delta_P
+      - methane_pump.delta_P
+      - lox_generator_valve.position
+      - methane_generator_valve.position
+    tolerances:
+      min_peak_thrust: 1.0e5
+      final_mdot_rel: 0.40
+      final_of_abs: 1.5
+      mdot_tracking_rms_rel: 0.45
+      min_shaft_speed_delta_rpm: 100.0
+      max_normalized_residual: 1.0e-8
+  regression:
+    case: 20_gg_single_shaft_methalox
+    report: gg_single_shaft_methalox.regression.json
+    windows:
+      - name: peak_thrust
+        channel: THRUST
+        reducer: max
+        minimum: 1.0e5
+        maximum: 2.0e5
+      - name: final_mdot
+        channel: MDOT_TOTAL
+        reducer: final
+        minimum: 0.0
+        maximum: 60.0
+      - name: max_shaft_speed
+        channel: SHAFT_RPM
+        reducer: max
+        minimum: 1.0e4
+        maximum: 5.0e4
+      - name: shutdown_thrust_decay
+        channel: THRUST
+        reducer: final
+        minimum: 0.0
+        maximum: 3.5e4

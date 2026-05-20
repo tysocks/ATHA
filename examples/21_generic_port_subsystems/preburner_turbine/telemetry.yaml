@@ -1,0 +1,16 @@
+name: preburner_turbine_telemetry
+sample_rate_hz: 2
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
+  - {alias: MDOT_TOTAL, source: mdot.total, units: kg/s}
+  - {alias: OF, source: chamber.OF}
+  - {alias: PREBURNER_P, source: preburner.P, units: Pa}
+  - {alias: PREBURNER_T, source: preburner.T, units: K}
+  - {alias: PREBURNER_MDOT, source: preburner.mdot, units: kg/s}
+  - {alias: TURBINE_POWER, source: turbine.power, units: W}
+  - {alias: TURBINE_PR, source: turbine.pressure_ratio}
+exports: {csv: true, plot: true}
+plots:
+  - {title: Preburner, x: TIME, y: [PREBURNER_P], ylabel: Pressure}
+  - {title: Turbine, x: TIME, y: [TURBINE_POWER], ylabel: Power}

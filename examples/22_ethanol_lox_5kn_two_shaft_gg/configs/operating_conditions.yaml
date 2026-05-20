@@ -1,0 +1,19 @@
+name: ethanol_lox_5kn_two_shaft_gg_targets
+targets:
+  mdot_total:
+    schedule:
+      type: table
+      values:
+        - [0.0, 0.30]
+        - [2.0, 2.08]
+        - [6.0, 2.08]
+        - [8.0, 1.45]
+        - [10.0, 0.0]
+  OF:
+    schedule:
+      type: table
+      values:
+        - [0.0, 1.20]
+        - [2.0, 1.35]
+        - [8.0, 1.35]
+        - [10.0, 1.35]

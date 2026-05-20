@@ -1,0 +1,89 @@
+name: ethanol_lox_5kn_two_shaft_gg
+engine: engine.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+controllers: controller.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: Radau
+    rtol: 1.0e-7
+    atol: 1.0e-8
+    max_step: 0.025
+analysis:
+  type: profile
+  reduced_cycle:
+    provider: two_shaft_gg
+    model:
+      lox_generator_fraction: 0.08
+      fuel_generator_fraction: 0.10
+      lox_inertia: 0.020
+      fuel_inertia: 0.012
+      lox_pump_dp: 1.9e6
+      fuel_pump_dp: 1.5e6
+      chamber_pressure_gain: 4.0e5
+      generator_pressure_gain: 6.0e5
+      generator_conductance: 3.5e-7
+  integration:
+    segment_at_controller_samples: false
+  time:
+    start_s: 0.0
+    end_s: 10.0
+    phases:
+      - {name: startup, start_s: 0.0, end_s: 2.0}
+      - {name: CLC, start_s: 2.0, end_s: 8.0}
+      - {name: shutdown, start_s: 8.0, end_s: 10.0}
+  fluids:
+    oxidizer: Oxygen
+    fuel: Ethanol
+  design:
+    thrust: 5000.0
+    isp_s: 245.0
+    chamber_pressure: 1.4e6
+    generator_pressure: 2.0e6
+    mdot_total: 2.08
+    OF: 1.35
+    mdot_lox: 1.195
+    mdot_fuel: 0.885
+    lox_shaft_rpm: 26000.0
+    fuel_shaft_rpm: 30000.0
+  initial_conditions:
+    lox_shaft.rpm: 21000.0
+    fuel_shaft.rpm: 24000.0
+    chamber.P: 6.0e5
+    generator.P: 1.2e6
+  output:
+    csv: ethanol_lox_5kn_two_shaft_gg.csv
+    plot: ethanol_lox_5kn_two_shaft_gg.png
+    diagnostics: ethanol_lox_5kn_two_shaft_gg.diagnostics.json
+  acceptance:
+    report: ethanol_lox_5kn_two_shaft_gg.acceptance.json
+    case: ethanol_lox_5kn_two_shaft_gg
+    evaluation_end_s: 7.99
+    shaft_paths: [lox_shaft.rpm, fuel_shaft.rpm]
+    required_paths:
+      - mdot.total
+      - chamber.OF
+      - nozzle.thrust
+      - lox_pump.delta_P
+      - fuel_pump.delta_P
+      - lox_generator_valve.position
+      - fuel_generator_valve.position
+    tolerances:
+      min_peak_thrust: 4000.0
+      final_mdot_rel: 0.45
+      final_of_abs: 0.65
+      mdot_tracking_rms_rel: 0.50
+      min_shaft_speed_delta_rpm: 500.0
+      max_normalized_residual: 1.0e-8
+  regression:
+    case: ethanol_lox_5kn_two_shaft_gg
+    report: ethanol_lox_5kn_two_shaft_gg.regression.json
+    windows:
+      - {name: peak_thrust, channel: THRUST, reducer: max, minimum: 4000.0, maximum: 7000.0}
+      - {name: final_thrust_decay, channel: THRUST, reducer: final, minimum: 0.0, maximum: 2500.0}
+      - {name: peak_mdot, channel: MDOT_TOTAL, reducer: max, minimum: 1.0, maximum: 3.5}
+      - {name: max_lox_speed, channel: LOX_SHAFT_RPM, reducer: max, minimum: 18000.0, maximum: 40000.0}
+      - {name: max_fuel_speed, channel: FUEL_SHAFT_RPM, reducer: max, minimum: 20000.0, maximum: 45000.0}

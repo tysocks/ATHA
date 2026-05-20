@@ -10,11 +10,11 @@ controllers:
       measurement: measurements.mdot_total
     output: lox_generator_valve.command
     parameters:
-      bias: 0.20
-      proportional_gain: 0.2
-      integral_gain: 0.05
-      derivative_gain: 0.0
-      lower_limit: 0.05
+      bias: 0.5
+      proportional_gain: 0.1
+      integral_gain: 0.25
+      derivative_gain: 0.
+      lower_limit: 0.00
       upper_limit: 1.00
   methane_generator_of_p:
     type: pid
@@ -24,9 +24,9 @@ controllers:
       measurement: measurements.OF
     output: methane_generator_valve.command
     parameters:
-      bias: 1
-      proportional_gain: -4
-      integral_gain: 0.2
-      derivative_gain: 0.001
-      lower_limit: 0.05
+      bias: 0
+      proportional_gain: -5.5
+      integral_gain: -4
+      derivative_gain: 0.0001
+      lower_limit: 0.00
       upper_limit: 1.00

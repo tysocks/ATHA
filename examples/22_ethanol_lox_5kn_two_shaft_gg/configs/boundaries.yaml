@@ -1,0 +1,7 @@
+name: ethanol_lox_5kn_two_shaft_gg_boundaries
+conditions:
+  lox_tank.P: {value: 3.0e5}
+  lox_tank.rho: {value: 1140.0}
+  fuel_tank.P: {value: 3.0e5}
+  fuel_tank.rho: {value: 790.0}
+  ambient.P: {value: 101325.0}

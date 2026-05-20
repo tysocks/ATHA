@@ -54,32 +54,7 @@ class RegressionReport:
         }
 
 
-EXAMPLE_REGRESSION_WINDOWS: dict[str, list[MetricWindow]] = {
-    "15_valve_volume_transient": [
-        MetricWindow("final_valve_position", "VALVE_POSITION", "final", expected=1.0, atol=2.0e-3),
-        MetricWindow("final_pressure_bar", "P_DOWNSTREAM", "final", expected=1.25875, atol=2.0e-2),
-        MetricWindow("final_mdot_in", "MDOT_IN", "final", expected=3.5937e-3, rtol=0.08),
-        MetricWindow("final_mdot_out", "MDOT_OUT", "final", expected=2.3162e-3, rtol=0.08),
-    ],
-    "16_two_valve_transient_chain": [
-        MetricWindow("final_valve_a_position", "VALVE_A_POSITION", "final", expected=1.0, atol=3.0e-3),
-        MetricWindow("final_valve_b_position", "VALVE_B_POSITION", "final", expected=0.9994, atol=3.0e-3),
-        MetricWindow("final_pc_bar", "PC", "final", expected=13.1833, atol=0.25),
-        MetricWindow("final_thrust", "THRUST", "final", expected=141.173, rtol=0.08),
-    ],
-    "17_tca_propellant_valve_transient": [
-        MetricWindow("final_methane_valve", "METHANE_VALVE_POSITION", "final", expected=1.0, atol=3.0e-3),
-        MetricWindow("final_lox_valve", "LOX_VALVE_POSITION", "final", expected=0.9994, atol=3.0e-3),
-        MetricWindow("final_of", "OF", "final", expected=3.1583, atol=0.25),
-        MetricWindow("final_thrust", "THRUST", "final", expected=150018.0, rtol=0.08),
-    ],
-    "18_tca_mdot_controller": [
-        MetricWindow("final_target_mdot", "TARGET_MDOT_TOTAL", "final", expected=20.0, atol=1.0e-9),
-        MetricWindow("final_mdot_total", "MDOT_TOTAL", "final", expected=21.0203, rtol=0.12),
-        MetricWindow("max_mdot_total", "MDOT_TOTAL", "max", expected=30.3500, rtol=0.08),
-        MetricWindow("final_lox_valve", "LOX_VALVE_POSITION", "final", expected=0.05287, rtol=0.25),
-    ],
-}
+EXAMPLE_REGRESSION_WINDOWS: dict[str, list[MetricWindow]] = {}
 
 
 def build_regression_report(
@@ -130,6 +105,38 @@ def write_regression_report_json(path: str | Path, report: RegressionReport) -> 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return out_path
+
+
+def regression_windows_from_config(raw: object) -> list[MetricWindow]:
+    """Parse YAML-style regression window dictionaries into metric windows."""
+
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("regression windows must be a list of mappings")
+    windows: list[MetricWindow] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"regression window {index} must be a mapping")
+        try:
+            name = str(item["name"])
+            channel = str(item["channel"])
+            reducer = str(item["reducer"])
+        except KeyError as exc:
+            raise ValueError(f"regression window {index} missing required key {exc.args[0]!r}") from exc
+        windows.append(
+            MetricWindow(
+                name=name,
+                channel=channel,
+                reducer=reducer,
+                expected=_optional_float(item.get("expected")),
+                atol=_optional_float(item.get("atol")),
+                rtol=_optional_float(item.get("rtol")),
+                minimum=_optional_float(item.get("minimum")),
+                maximum=_optional_float(item.get("maximum")),
+            )
+        )
+    return windows
 
 
 def _evaluate_window(window: MetricWindow, channels: Mapping[str, np.ndarray]) -> RegressionCheck:
@@ -194,3 +201,7 @@ def _window_passed(value: float, window: MetricWindow) -> tuple[bool, str]:
     if error <= limit:
         return True, f"abs_error {error:.6g} <= {limit:.6g}"
     return False, f"abs_error {error:.6g} > {limit:.6g}"
+
+
+def _optional_float(value: object) -> float | None:
+    return None if value is None else float(value)

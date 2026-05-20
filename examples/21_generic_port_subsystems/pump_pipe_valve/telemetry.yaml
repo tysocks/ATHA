@@ -1,0 +1,15 @@
+name: pump_pipe_valve_telemetry
+sample_rate_hz: 2
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
+  - {alias: MDOT_TOTAL, source: mdot.total, units: kg/s}
+  - {alias: OF, source: chamber.OF}
+  - {alias: PUMP_DP, source: pump.delta_P, units: Pa}
+  - {alias: PUMP_POWER, source: pump.power, units: W}
+  - {alias: PIPE_MDOT, source: pipe.mdot, units: kg/s}
+  - {alias: VALVE_COMMAND, source: valve.command}
+exports: {csv: true, plot: true}
+plots:
+  - {title: Flow, x: TIME, y: [TARGET_MDOT_TOTAL, MDOT_TOTAL], ylabel: Mass flow}
+  - {title: Pump, x: TIME, y: [PUMP_DP], ylabel: Pressure}

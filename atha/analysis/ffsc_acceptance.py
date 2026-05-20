@@ -28,6 +28,7 @@ from atha.network import NetworkProblem, NetworkResidual, NetworkVariable
 from atha.output.processor import OutputProcessor
 from atha.output.sampling import telemetry_times
 from atha.output.telemetry import validate_telemetry_sources
+from atha.analysis.transient_reporting import transient_run_provenance
 from atha.validation.acceptance import build_ffsc_reduced_acceptance_report, write_acceptance_report_json
 
 
@@ -252,19 +253,6 @@ def run_ffsc_dae_transient(
         sample.update({key: float(value) for key, value in values.items() if isinstance(value, (int, float, np.floating))})
         samples.append(sample)
 
-    artifacts, _headers, _columns = OutputProcessor(
-        output_dir=output_dir,
-        telemetry_config=loaded.telemetry,
-        run_output=run["output"],
-        metadata={"analysis": loaded.analysis_config.name, "analysis_type": run.get("type", "")},
-    ).write(
-        samples,
-        residuals=residual_report,
-        state_history={key: np.asarray(value, dtype=float) for key, value in state_history.items()},
-        algebraic_history={key: np.asarray(value, dtype=float) for key, value in algebraic_history.items()},
-        residual_history={key: np.asarray(value, dtype=float) for key, value in residual_history.items()},
-        boundary_history={key: np.asarray(value, dtype=float) for key, value in boundary_history.items()},
-    )
     linearization_path = None
     linearization_cfg = run.get("linearization", {}) if isinstance(run.get("linearization", {}), dict) else {}
     if bool(linearization_cfg.get("enabled", True)):
@@ -306,6 +294,36 @@ def run_ffsc_dae_transient(
         if isinstance(run.get("acceptance", {}), dict)
         else output_dir / Path(str(run["output"]["csv"])).with_suffix(".acceptance.json").name,
         acceptance_report,
+    )
+    provenance = transient_run_provenance(
+        loaded=loaded,
+        config_path=path,
+        run=run,
+        residuals=residual_report,
+        residual_history={key: np.asarray(value, dtype=float) for key, value in residual_history.items()},
+        acceptance_report=acceptance_report_path,
+        acceptance_passed=acceptance_report.passed,
+        extra={
+            "runner": "ffsc_reduced_dae_transient",
+            "linearization": None if linearization_path is None else str(linearization_path),
+        },
+    )
+    artifacts, _headers, _columns = OutputProcessor(
+        output_dir=output_dir,
+        telemetry_config=loaded.telemetry,
+        run_output=run["output"],
+        metadata={
+            "analysis": loaded.analysis_config.name,
+            "analysis_type": run.get("type", ""),
+            "provenance": provenance,
+        },
+    ).write(
+        samples,
+        residuals=residual_report,
+        state_history={key: np.asarray(value, dtype=float) for key, value in state_history.items()},
+        algebraic_history={key: np.asarray(value, dtype=float) for key, value in algebraic_history.items()},
+        residual_history={key: np.asarray(value, dtype=float) for key, value in residual_history.items()},
+        boundary_history={key: np.asarray(value, dtype=float) for key, value in boundary_history.items()},
     )
 
     if target_samples is None:

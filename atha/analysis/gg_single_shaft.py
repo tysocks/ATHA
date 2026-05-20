@@ -18,9 +18,15 @@ from atha.config import (
 )
 from atha.config.controllers import controller_evaluation_period, controller_sample_index
 from atha.examples.common import coerce_numbers
+from atha.analysis.transient_reporting import transient_run_provenance
 from atha.output.processor import OutputProcessor
 from atha.output.sampling import telemetry_times
 from atha.output.telemetry import validate_telemetry_sources
+from atha.validation.regression import (
+    build_regression_report,
+    regression_windows_from_config,
+    write_regression_report_json,
+)
 
 
 @dataclass
@@ -35,6 +41,8 @@ class GGSingleShaftSummary:
     manifest: Path | None = None
     residuals_csv: Path | None = None
     residuals_json: Path | None = None
+    regression_report: Path | None = None
+    regression_passed: bool | None = None
     time: np.ndarray | None = None
     mdot_total: np.ndarray | None = None
     of_ratio: np.ndarray | None = None
@@ -197,12 +205,57 @@ def run_gg_single_shaft_transient(config_path: str | Path, output_dir: str | Pat
         sample.update({key: float(value) for key, value in values.items() if isinstance(value, (int, float, np.floating))})
         samples.append(sample)
 
+    residuals = {"reduced_model_residual": 0.0}
+    regression_report_path = None
+    regression_passed = None
+    regression_cfg = run.get("regression", {}) if isinstance(run.get("regression", {}), dict) else {}
+    regression_windows = regression_windows_from_config(regression_cfg.get("windows"))
+    if regression_windows:
+        regression_report = build_regression_report(
+            case=str(regression_cfg.get("case", loaded.analysis_config.name)),
+            time=t,
+            channels={
+                "MDOT_TOTAL": mdot_total,
+                "OF": of_ratio,
+                "CHAMBER_PRESSURE": chamber_pressure,
+                "THRUST": thrust,
+                "SHAFT_RPM": shaft_rpm,
+            },
+            windows=regression_windows,
+            metadata={"source": "in_memory", "analysis_type": run.get("type", "")},
+        )
+        report_name = str(
+            regression_cfg.get(
+                "report",
+                Path(str(run["output"]["csv"])).with_suffix(".regression.json").name,
+            )
+        )
+        regression_report_path = write_regression_report_json(output_dir / report_name, regression_report)
+        regression_passed = regression_report.passed
+
+    provenance = transient_run_provenance(
+        loaded=loaded,
+        config_path=path,
+        run=run,
+        residuals=residuals,
+        extra={
+            "runner": "gg_single_shaft_transient",
+            "regression_report": None if regression_report_path is None else str(regression_report_path),
+            "regression_passed": regression_passed,
+        },
+    )
     artifacts, _headers, _columns = OutputProcessor(
         output_dir=output_dir,
         telemetry_config=loaded.telemetry,
         run_output=run["output"],
-        metadata={"analysis": loaded.analysis_config.name, "analysis_type": run.get("type", "")},
-    ).write(samples, residuals={"reduced_model_residual": 0.0})
+        metadata={
+            "analysis": loaded.analysis_config.name,
+            "analysis_type": run.get("type", ""),
+            "provenance": provenance,
+            "regression_report": None if regression_report_path is None else str(regression_report_path),
+            "regression_passed": regression_passed,
+        },
+    ).write(samples, residuals=residuals)
     return GGSingleShaftSummary(
         config_path=path,
         component_count=len(loaded.engine.components),
@@ -214,6 +267,8 @@ def run_gg_single_shaft_transient(config_path: str | Path, output_dir: str | Pat
         manifest=artifacts.manifest,
         residuals_csv=artifacts.residuals_csv,
         residuals_json=artifacts.residuals_json,
+        regression_report=regression_report_path,
+        regression_passed=regression_passed,
         time=t,
         mdot_total=mdot_total,
         of_ratio=of_ratio,

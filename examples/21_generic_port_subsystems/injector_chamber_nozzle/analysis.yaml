@@ -1,0 +1,42 @@
+name: injector_chamber_nozzle_generic_port
+engine: ../generic_engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+analysis:
+  type: profile
+  time: {start_s: 0.0, end_s: 3.0}
+  solve_policy: {residual_tolerance: 1.0e-6}
+  trim: {enabled: true}
+  output:
+    csv: injector_chamber_nozzle.csv
+    plot: injector_chamber_nozzle.png
+    diagnostics: injector_chamber_nozzle.profile.json
+  balances:
+    mdot_total:
+      residual: {expression: mdot.total - targets.mdot_total, scale: 10.0}
+      variable: mdot.total
+      bounds: [0.0, 20.0]
+    of_ratio:
+      residual: {expression: chamber.OF - targets.OF, scale: 4.0}
+      variable: chamber.OF
+      bounds: [1.0, 6.0]
+    injector_mdot:
+      residual: {expression: injector.mdot - mdot.total, scale: 10.0}
+      variable: injector.mdot
+      bounds: [0.0, 20.0]
+    chamber_pressure:
+      residual: {expression: chamber.P - 250000.0 * mdot.total, scale: 3000000.0}
+      variable: chamber.P
+      bounds: [100000.0, 5000000.0]
+    nozzle_mdot:
+      residual: {expression: nozzle.mdot - injector.mdot, scale: 10.0}
+      variable: nozzle.mdot
+      bounds: [0.0, 20.0]
+    thrust:
+      residual: {expression: nozzle.thrust - 3000.0 * nozzle.mdot, scale: 30000.0}
+      variable: nozzle.thrust
+      bounds: [0.0, 60000.0]
+  acceptance:
+    report: injector_chamber_nozzle.acceptance.json
+    case: injector_chamber_nozzle_generic_port
+    tolerances: {final_mdot_rel: 0.05, final_of_abs: 0.05, min_peak_thrust: 10000.0, max_normalized_residual: 1.0e-6}

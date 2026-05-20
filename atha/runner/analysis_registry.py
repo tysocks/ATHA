@@ -70,38 +70,6 @@ def default_analysis_registry() -> AnalysisRegistry:
     registry = AnalysisRegistry()
     registry.register(
         AnalysisSpec(
-            type_name="valve_volume_transient",
-            handler=_run_valve_volume_transient,
-            mode="transient",
-            description="Single valve feeding a gas volume with outlet inertia.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="two_valve_transient_chain",
-            handler=_run_pressure_fed_tca,
-            mode="transient",
-            description="Pressure-fed two-leg valve/pipe/injector/chamber/nozzle chain.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="tca_propellant_valve_transient",
-            handler=_run_pressure_fed_tca,
-            mode="transient",
-            description="Methalox TCA valve transient using the pressure-fed network solver.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="tca_mdot_controller",
-            handler=_run_pressure_fed_tca,
-            mode="transient",
-            description="Methalox TCA with operating-condition mass-flow controller.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
             type_name="ffsc_dae_transient",
             handler=_run_ffsc_dae_acceptance,
             mode="transient",
@@ -114,14 +82,6 @@ def default_analysis_registry() -> AnalysisRegistry:
             handler=_run_gg_single_shaft,
             mode="transient",
             description="Reduced-order methalox gas-generator single-shaft transient.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="nominal_mc_sweep",
-            handler=_run_nominal_mc_sweep,
-            mode="sweep",
-            description="Gas-generator nominal solve with Monte Carlo and speed sweep.",
         )
     )
     registry.register(
@@ -161,35 +121,14 @@ def default_analysis_registry() -> AnalysisRegistry:
     )
     registry.register(
         AnalysisSpec(
-            type_name="sweep",
-            handler=_run_generic_sweep,
-            mode="sweep",
-            description="Generic structured sweep over YAML dotted-path perturbations.",
-            accepts_context=True,
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="monte_carlo",
-            handler=_run_generic_sweep,
-            mode="sweep",
-            description="Generic Monte Carlo over YAML dotted-path perturbations.",
+            type_name="parity",
+            handler=_run_parity_analysis,
+            mode="validation",
+            description="Run reference/candidate configs and write transient parity reports.",
             accepts_context=True,
         )
     )
     return registry
-
-
-def _run_valve_volume_transient(config_path: Path, output_dir: Path) -> object:
-    from atha.examples.valve_volume import run_valve_volume_profile
-
-    return run_valve_volume_profile(config_path, output_dir=output_dir)
-
-
-def _run_pressure_fed_tca(config_path: Path, output_dir: Path) -> object:
-    from atha.analysis.pressure_fed import run_pressure_fed_tca
-
-    return run_pressure_fed_tca(config_path, output_dir=output_dir)
 
 
 def _run_ffsc_dae_acceptance(config_path: Path, output_dir: Path) -> object:
@@ -202,12 +141,6 @@ def _run_gg_single_shaft(config_path: Path, output_dir: Path) -> object:
     from atha.analysis.gg_single_shaft import run_gg_single_shaft_transient
 
     return run_gg_single_shaft_transient(config_path, output_dir=output_dir)
-
-
-def _run_nominal_mc_sweep(config_path: Path, output_dir: Path) -> object:
-    from atha.analysis.gg_mc_sweep import run_nominal_mc_sweep
-
-    return run_nominal_mc_sweep(config_path, output_dir=output_dir)
 
 
 def _run_port_network_diagnostics(config_path: Path, output_dir: Path) -> object:
@@ -234,10 +167,12 @@ def _run_generic_linearization(context: AnalysisContext) -> object:
     return run_generic_linearization(context)
 
 
-def _run_generic_sweep(context: AnalysisContext) -> object:
-    from atha.analysis.generic_sweep import run_generic_sweep
+def _run_parity_analysis(context: AnalysisContext) -> object:
+    from atha.analysis.parity_mode import run_parity_analysis
 
-    return run_generic_sweep(context)
+    return run_parity_analysis(context)
+
+
 
 
 DEFAULT_ANALYSIS_REGISTRY = default_analysis_registry()

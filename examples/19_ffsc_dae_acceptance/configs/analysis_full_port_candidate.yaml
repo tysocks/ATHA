@@ -1,0 +1,106 @@
+name: ffsc_dae_acceptance_full_port_candidate
+engine: engine_full_port_candidate.yaml
+maps:
+  lox_pump_affinity: maps/lox_pump_affinity.yaml
+  methane_pump_affinity: maps/methane_pump_affinity.yaml
+  lox_turbine_affinity: maps/lox_turbine_affinity.yaml
+  methane_turbine_affinity: maps/methane_turbine_affinity.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+controllers: controller.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: Radau
+    rtol: 1.0e-7
+    atol: 1.0e-6
+    max_step: 0.05
+analysis:
+  type: profile
+  solve_policy:
+    checked: false
+    residual_tolerance: 1.0e-6
+    strict_sources: true
+    corrector: endpoint
+    corrector_iterations: 2
+    preconditioner: design
+    max_nfev: 20
+  integration:
+    segment_at_controller_samples: false
+  time:
+    start_s: 0.0
+    end_s: 30.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 3.0
+      - name: CLC
+        start_s: 3.0
+        end_s: 25.0
+      - name: shutdown
+        start_s: 25.0
+        end_s: 30.0
+  fluids:
+    oxidizer: Oxygen
+    fuel: Methane
+  combustion:
+    mechanism: gri30.yaml
+    fuel: CH4
+    oxidizer: O2
+    chamber_initial_X: H2O:0.60,CO2:0.25,CO:0.08,H2:0.07
+    gas_T: 3500.0
+  design:
+    thrust: 150000.0
+    chamber_pressure: 5.0e6
+    mdot_total: 40.0
+    OF: 3.2
+    mdot_lox: 30.48
+    mdot_methane: 9.52
+  initial_conditions:
+    lox_shaft.omega: 3350.0
+    methane_shaft.omega: 2825.0
+    chamber.P: 5.0e6
+    chamber.T: 3500.0
+    ox_preburner.P: 8.0e6
+    fuel_preburner.P: 8.0e6
+  output:
+    csv: ffsc_dae_acceptance_full_port_candidate.csv
+    plot: ffsc_dae_acceptance_full_port_candidate.png
+    diagnostics: ffsc_dae_acceptance_full_port_candidate.diagnostics.json
+  linearization:
+    enabled: true
+    output: ffsc_dae_acceptance_full_port_candidate.linearization.json
+    perturbations:
+      state_default: 1.0e-6
+      input_default: 1.0e-5
+  acceptance:
+    description: Generic DAE profile execution of the FFSC reduced-cycle transient oracle.
+    report: ffsc_dae_acceptance_full_port_candidate.acceptance.json
+    case: ffsc_dae_acceptance_full_port_candidate
+    evaluation_end_s: 24.99
+    shaft_paths: [lox_shaft.rpm, methane_shaft.rpm]
+    required_paths:
+      - mdot.total
+      - chamber.OF
+      - nozzle.thrust
+      - lox_pump.inlet.mdot
+      - methane_pump.inlet.mdot
+      - methane_crossover_valve.position
+      - lox_crossover_valve.position
+    tolerances:
+      final_mdot_rel: 0.35
+      final_thrust_rel: 0.35
+      final_of_abs: 3.0
+      mdot_tracking_rms_rel: 0.35
+      of_tracking_rms_abs: 1.75
+      min_shaft_speed_delta_rpm: 100.0
+      max_normalized_residual: 1.0e-6
+    expected_behavior:
+      - mdot_total target changes drive methane_crossover_valve.command.
+      - OF target changes drive lox_crossover_valve.command.
+      - preburner branch flow changes alter turbine torque.
+      - turbine torque changes lox_shaft.omega and methane_shaft.omega.
+      - pump pressure rise changes through affinity-law map behavior.
+      - chamber flow and thrust settle near 150 kN at the 40 kg/s target.

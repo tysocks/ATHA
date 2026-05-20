@@ -20,6 +20,32 @@ class FluidState:
     MW:      float          # kg/mol, molecular weight
     phase:   str            # 'liquid'|'gas'|'two-phase'|'supercritical'
     quality: Optional[float]  # vapor quality [0,1] for two-phase, else None
+    mdot:    float = 0.0    # kg/s, optional port mass-flow carried with state
+    fluid:   str = ""       # fluid/species identifier
+    model:   str = ""       # property model family
+
+    def as_port_values(self) -> dict[str, float | str]:
+        """Return scalar values suitable for ATHA dotted-path port inputs."""
+
+        values: dict[str, float | str] = {
+            "P": self.P,
+            "T": self.T,
+            "h": self.h,
+            "rho": self.rho,
+            "s": self.s,
+            "cp": self.cp,
+            "cv": self.cv,
+            "gamma": self.gamma,
+            "mu": self.mu,
+            "k": self.k,
+            "MW": self.MW,
+            "mdot": self.mdot,
+        }
+        if self.fluid:
+            values["fluid"] = self.fluid
+        if self.model:
+            values["model"] = self.model
+        return values
 
 
 class ThermoBackend(ABC):

@@ -1,0 +1,4 @@
+name: pump_pipe_valve_targets
+targets:
+  mdot_total: {value: 12.0}
+  OF: {value: 3.0}

@@ -1,0 +1,4 @@
+name: preburner_turbine_targets
+targets:
+  mdot_total: {value: 3.0}
+  OF: {value: 0.7}

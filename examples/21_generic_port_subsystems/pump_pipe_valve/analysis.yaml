@@ -1,0 +1,40 @@
+name: pump_pipe_valve_generic_port
+engine: ../generic_engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+analysis:
+  type: profile
+  time: {start_s: 0.0, end_s: 3.0}
+  solve_policy: {residual_tolerance: 1.0e-6}
+  trim: {enabled: true}
+  output:
+    csv: pump_pipe_valve.csv
+    plot: pump_pipe_valve.png
+    diagnostics: pump_pipe_valve.profile.json
+  balances:
+    mdot_total:
+      residual: {expression: mdot.total - targets.mdot_total, scale: 20.0}
+      variable: mdot.total
+      bounds: [0.0, 40.0]
+    of_ratio:
+      residual: {expression: chamber.OF - targets.OF, scale: 4.0}
+      variable: chamber.OF
+      bounds: [1.0, 6.0]
+    pump_delta_p:
+      residual: {expression: pump.delta_P - 10000000.0, scale: 10000000.0}
+      variable: pump.delta_P
+      bounds: [100000.0, 20000000.0]
+    pump_power:
+      residual: {expression: pump.power - mdot.total * pump.delta_P / (1000.0 * 0.7), scale: 1000000.0}
+      variable: pump.power
+    pipe_mdot:
+      residual: {expression: pipe.mdot - mdot.total, scale: 20.0}
+      variable: pipe.mdot
+    valve_command:
+      residual: {expression: valve.command - 0.8, scale: 1.0}
+      variable: valve.command
+      bounds: [0.0, 1.0]
+  acceptance:
+    report: pump_pipe_valve.acceptance.json
+    case: pump_pipe_valve_generic_port
+    tolerances: {final_mdot_rel: 0.05, final_of_abs: 0.05, max_normalized_residual: 1.0e-6}

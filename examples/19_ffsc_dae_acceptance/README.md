@@ -35,5 +35,5 @@ What is still pending:
 - map-backed pump/turbine residuals;
 - true full-port steady trim before transient integration.
 
-Those items are tracked as the full arbitrary ROCETS-like port solve in
-`development/2026-05-08-general-config-runner-architecture.md`.
+Those items are tracked in the retained full-port candidate configuration files
+under this example's `configs/` directory.

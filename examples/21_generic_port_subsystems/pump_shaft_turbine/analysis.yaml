@@ -1,0 +1,41 @@
+name: pump_shaft_turbine_generic_port
+engine: ../generic_engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+analysis:
+  type: profile
+  time: {start_s: 0.0, end_s: 3.0}
+  solve_policy: {residual_tolerance: 1.0e-6}
+  trim: {enabled: true}
+  output:
+    csv: pump_shaft_turbine.csv
+    plot: pump_shaft_turbine.png
+    diagnostics: pump_shaft_turbine.profile.json
+  balances:
+    mdot_total:
+      residual: {expression: mdot.total - targets.mdot_total, scale: 20.0}
+      variable: mdot.total
+    of_ratio:
+      residual: {expression: chamber.OF - targets.OF, scale: 4.0}
+      variable: chamber.OF
+    shaft_speed:
+      residual: {expression: shaft.rpm - (28000.0 + 2000.0 * time / 3.0), scale: 40000.0}
+      variable: shaft.rpm
+      bounds: [10000.0, 50000.0]
+    pump_power:
+      residual: {expression: pump.power - 700000.0, scale: 1000000.0}
+      variable: pump.power
+    turbine_power:
+      residual: {expression: turbine.power - pump.power, scale: 1000000.0}
+      variable: turbine.power
+    pump_tau:
+      residual: {expression: pump.tau_load - pump.power / (shaft.rpm * 0.104719755), scale: 1000.0}
+      variable: pump.tau_load
+    turbine_tau:
+      residual: {expression: turbine.tau_drive - turbine.power / (shaft.rpm * 0.104719755), scale: 1000.0}
+      variable: turbine.tau_drive
+  acceptance:
+    report: pump_shaft_turbine.acceptance.json
+    case: pump_shaft_turbine_generic_port
+    shaft_paths: [shaft.rpm]
+    tolerances: {final_mdot_rel: 0.05, final_of_abs: 0.05, min_shaft_speed_delta_rpm: 1000.0, max_normalized_residual: 1.0e-6}

@@ -1,9 +1,0 @@
-name: gg_lox_methane_boundaries
-time_unit: s
-conditions:
-  lox_tank.outlet.P: {value: 4.0e5, units: Pa}
-  lox_tank.outlet.T: {value: 91.0, units: K}
-  fuel_tank.outlet.P: {value: 4.0e5, units: Pa}
-  fuel_tank.outlet.T: {value: 108.0, units: K}
-  nozzle.ambient.P: {value: 0.0, units: Pa}
-  shaft.omega_override: {value: 2932.1531433504737, units: rad/s}

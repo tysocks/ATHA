@@ -1,8 +1,0 @@
-name: lox_pump_efficiency
-kind: constant
-source:
-  type: constant
-  values:
-    efficiency: 0.74
-outputs:
-  - name: efficiency

@@ -1,0 +1,26 @@
+name: ethanol_lox_5kn_two_shaft_gg_transients
+transients:
+  main_lox_valve:
+    type: first_order
+    input: main_lox_valve.command
+    output: main_lox_valve.position
+    initial: 0.10
+    parameters: {time_constant: 0.20, lower_limit: 0.0, upper_limit: 1.0}
+  main_fuel_valve:
+    type: first_order
+    input: main_fuel_valve.command
+    output: main_fuel_valve.position
+    initial: 0.10
+    parameters: {time_constant: 0.20, lower_limit: 0.0, upper_limit: 1.0}
+  lox_generator_valve:
+    type: first_order
+    input: lox_generator_valve.command
+    output: lox_generator_valve.position
+    initial: 0.30
+    parameters: {time_constant: 0.12, lower_limit: 0.0, upper_limit: 1.0}
+  fuel_generator_valve:
+    type: first_order
+    input: fuel_generator_valve.command
+    output: fuel_generator_valve.position
+    initial: 0.30
+    parameters: {time_constant: 0.12, lower_limit: 0.0, upper_limit: 1.0}

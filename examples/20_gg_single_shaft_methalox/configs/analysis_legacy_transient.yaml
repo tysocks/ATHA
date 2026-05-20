@@ -1,0 +1,69 @@
+name: gg_single_shaft_methalox_legacy_transient
+engine: engine.yaml
+maps:
+  lox_pump_affinity: maps/lox_pump_affinity.yaml
+  methane_pump_affinity: maps/methane_pump_affinity.yaml
+  turbine_affinity: maps/turbine_affinity.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+controllers: controller.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  dae:
+    method: Radau
+    rtol: 1.0e-7
+    atol: 1.0e-6
+    max_step: 0.005
+analysis:
+  type: gg_single_shaft_transient
+  time:
+    start_s: 0.0
+    end_s: 30.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 3.0
+      - name: CLC
+        start_s: 3.0
+        end_s: 25.0
+      - name: shutdown
+        start_s: 25.0
+        end_s: 30.0
+  design:
+    thrust: 150000.0
+    chamber_pressure: 5.0e6
+    mdot_total: 40.0
+    OF: 3.2
+  initial_conditions:
+    shaft.rpm: 24000.0
+    chamber.P: 4.0e6
+    generator.P: 6.0e6
+  output:
+    csv: gg_single_shaft_methalox_legacy_transient.csv
+    plot: gg_single_shaft_methalox_legacy_transient.png
+  regression:
+    case: 20_gg_single_shaft_methalox_legacy_transient
+    report: gg_single_shaft_methalox_legacy_transient.regression.json
+    windows:
+      - name: peak_thrust
+        channel: THRUST
+        reducer: max
+        minimum: 1.0e5
+        maximum: 2.0e5
+      - name: final_mdot
+        channel: MDOT_TOTAL
+        reducer: final
+        minimum: 0.0
+        maximum: 60.0
+      - name: max_shaft_speed
+        channel: SHAFT_RPM
+        reducer: max
+        minimum: 1.0e4
+        maximum: 5.0e4
+      - name: shutdown_thrust_decay
+        channel: THRUST
+        reducer: final
+        minimum: 0.0
+        maximum: 3.5e4

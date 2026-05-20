@@ -1,0 +1,4 @@
+name: injector_chamber_nozzle_targets
+targets:
+  mdot_total: {value: 8.0}
+  OF: {value: 3.1}

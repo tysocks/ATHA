@@ -1,0 +1,32 @@
+name: ethanol_lox_5kn_two_shaft_gg_controller
+evaluation:
+  frequency_hz: 20.0
+controllers:
+  lox_generator_mdot_pid:
+    type: pid
+    active_phases: [CLC]
+    inputs:
+      target: targets.mdot_total
+      measurement: measurements.mdot_total
+    output: lox_generator_valve.command
+    parameters:
+      bias: 0.45
+      proportional_gain: 2
+      integral_gain: 0.05
+      derivative_gain: 0.005
+      lower_limit: 0.05
+      upper_limit: 1.00
+  fuel_generator_of_pid:
+    type: pid
+    active_phases: [CLC]
+    inputs:
+      target: targets.OF
+      measurement: measurements.OF
+    output: fuel_generator_valve.command
+    parameters:
+      bias: 0.45
+      proportional_gain: -0.35
+      integral_gain: -0.08
+      derivative_gain: -0.005
+      lower_limit: 0.05
+      upper_limit: 1.00
