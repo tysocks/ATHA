@@ -13,7 +13,7 @@ from atha.runner.progress import SolverProgressEvent
 class AnalysisContext:
     """Shared execution context passed to analysis handlers.
 
-    The context is the Phase-19 bridge between config loading, execution-plan
+    The context is the Phase-19 handoff between config loading, execution-plan
     construction, source catalogs, and analysis-specific solver implementations.
     Handlers can still accept the older ``(config_path, output_dir)`` signature,
     but new handlers should prefer this object.

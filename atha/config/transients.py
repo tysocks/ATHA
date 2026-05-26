@@ -196,7 +196,7 @@ class TransientSystem:
         for block in self.blocks:
             local = state[self._slices[block.name]]
             for i, name in enumerate(block.state_names):
-                samples[name] = float(local[i])
+                samples.setdefault(name, float(local[i]))
         return samples
 
     def derivatives(self, t: float, state: np.ndarray, command_values: Mapping[str, float]) -> np.ndarray:

@@ -1,0 +1,23 @@
+name: single_lox_pump_map_timings
+events:
+  - target: control_valve.command
+    schedule:
+      type: table
+      values:
+        - [0.0, 0.0]
+        - [0.199, 0.0]
+        - [0.2, 0.50]
+        - [0.5, 0.50]
+        - [8.999, 0.50]
+        - [9.0, 0.0]
+        - [10.0, 0.0]
+  - target: pump_speed.command
+    schedule:
+      type: table
+      values:
+        - [0.0, 4350]
+        - [1.999, 4350]
+        - [2.0, 4350]
+        - [8.999, 4350]
+        - [9.0, 0.0]
+        - [10.0, 0.0]

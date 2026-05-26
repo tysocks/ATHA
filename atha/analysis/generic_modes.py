@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -8,14 +8,13 @@ from typing import Any, Mapping
 import numpy as np
 
 from atha.analysis.linearization import PerturbationConfig, finite_difference_state_space, write_linearization_json
-from atha.analysis.reduced_cycles import build_reduced_cycle_provider
 from atha.output.processor import OutputProcessor
 from atha.output.sampling import telemetry_times
 from atha.output.telemetry import validate_telemetry_sources
 from atha.output.provenance import RUN_PROVENANCE_SCHEMA, build_run_provenance, config_hash, git_commit
 from atha.runner.context import AnalysisContext
 from atha.runner.dae_execution import DAEExecutionProblem, DAEExecutionResult, DAEPoint
-from atha.validation.acceptance import build_generic_port_acceptance_report, write_acceptance_report_json
+from atha.validation.acceptance import AcceptanceCheck, build_generic_port_acceptance_report, write_acceptance_report_json
 from atha.validation.regression import (
     build_regression_report_from_file,
     regression_windows_from_config,
@@ -44,13 +43,13 @@ class GenericDAESummary:
     algebraic_names: list[str] | None = None
     residual_names: list[str] | None = None
     integration_segments: list[dict[str, Any]] | None = None
+    solver_source: str = "generic_port"
 
 
 def run_generic_steady(context: AnalysisContext) -> GenericDAESummary:
     problem = DAEExecutionProblem(
         context.loaded,
         context.execution_plan,
-        reduced_cycle_provider=build_reduced_cycle_provider(context.loaded),
         progress_callback=context.progress_callback,
     )
     point = problem.trim_initial_conditions()
@@ -69,18 +68,17 @@ def run_generic_steady(context: AnalysisContext) -> GenericDAESummary:
         algebraic_names=problem.algebraic_names,
         residual_names=problem.network_problem.residual_names,
         integration_segments=[{"start_s": context.execution_plan.time_start_s, "end_s": context.execution_plan.time_start_s, "reason": "steady"}],
+        solver_source=problem.solver_source,
     )
 
 
 def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
-    reduced_cycle_provider = build_reduced_cycle_provider(context.loaded)
     problem = DAEExecutionProblem(
         context.loaded,
         context.execution_plan,
-        reduced_cycle_provider=reduced_cycle_provider,
         progress_callback=context.progress_callback,
     )
-    trim_point = problem.trim_initial_conditions() if context.execution_plan.trim_enabled else None
+    trim_point = problem.trim_initial_conditions()
     sample_times = _sample_times(context)
     result = problem.integrate(sample_times)
     integration_segments = [
@@ -89,7 +87,7 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
     ]
     output = _run_output(context.loaded.analysis_config.analysis, "profile.csv")
     residuals_json = context.output_dir / str(output.get("diagnostics", "profile_diagnostics.json"))
-    acceptance_path, acceptance_passed = _write_acceptance_if_configured(context, result)
+    acceptance_path, acceptance_passed = _write_acceptance_if_configured(context, result, problem)
     result_payload = _result_payload(result)
     provenance = _run_provenance(
         context,
@@ -148,6 +146,7 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
         algebraic_names=result.algebraic_names,
         residual_names=result.residual_names,
         integration_segments=integration_segments,
+        solver_source=problem.solver_source,
     )
 
 
@@ -155,7 +154,6 @@ def run_generic_linearization(context: AnalysisContext) -> GenericDAESummary:
     problem = DAEExecutionProblem(
         context.loaded,
         context.execution_plan,
-        reduced_cycle_provider=build_reduced_cycle_provider(context.loaded),
         progress_callback=context.progress_callback,
     )
     x0 = problem.initial_state()
@@ -195,6 +193,7 @@ def run_generic_linearization(context: AnalysisContext) -> GenericDAESummary:
         state_names=problem.state_names,
         algebraic_names=problem.algebraic_names,
         residual_names=problem.network_problem.residual_names,
+        solver_source=problem.solver_source,
     )
 
 
@@ -235,6 +234,9 @@ def _point_values(point: DAEPoint) -> dict[str, float]:
     for key, value in point.timings.items():
         if _is_number(value):
             values.setdefault(key, float(value))
+    for key, value in list(values.items()):
+        if key.endswith(".command") and ("speed" in key or "omega" in key):
+            values.setdefault(f"{key}.rpm", float(value) * 60.0 / (2.0 * np.pi))
     values.update({f"residuals.{key}": float(value) for key, value in point.normalized_residuals.items()})
     return values
 
@@ -336,6 +338,7 @@ def _run_provenance(
             "corrector": problem.solve_policy.corrector,
             "corrector_iterations": int(problem.solve_policy.corrector_iterations),
             "preconditioner": problem.solve_policy.preconditioner,
+            "algebraic_solver": problem.solve_policy.algebraic_solver,
         },
         residual_tolerance=float(problem.solve_policy.residual_tolerance),
         residual_history=result.residual_history if result is not None else None,
@@ -345,6 +348,9 @@ def _run_provenance(
         time_end_s=float(context.execution_plan.time_end_s),
         acceptance_report=acceptance_path,
         acceptance_passed=acceptance_passed,
+        extra={
+            "solver_source": problem.solver_source,
+        },
     )
     if trim_point is not None:
         payload["trim"] = _trim_payload(trim_point, problem)
@@ -390,7 +396,11 @@ def _result_sources(result: DAEExecutionResult) -> set[str]:
     return paths
 
 
-def _write_acceptance_if_configured(context: AnalysisContext, result: DAEExecutionResult) -> tuple[Path | None, bool | None]:
+def _write_acceptance_if_configured(
+    context: AnalysisContext,
+    result: DAEExecutionResult,
+    problem: DAEExecutionProblem,
+) -> tuple[Path | None, bool | None]:
     cfg = context.analysis.get("acceptance", {})
     if not isinstance(cfg, Mapping):
         return None, None
@@ -410,8 +420,34 @@ def _write_acceptance_if_configured(context: AnalysisContext, result: DAEExecuti
         required_paths=tuple(str(path) for path in cfg.get("required_paths", []) if isinstance(path, str)) if isinstance(cfg.get("required_paths", []), list) else (),
         evaluation_end_s=float(cfg["evaluation_end_s"]) if cfg.get("evaluation_end_s") is not None else None,
     )
+    metadata = dict(report.metadata)
+    checks = list(report.checks)
+    required_source = cfg.get("require_solver_source")
+    if required_source is not None:
+        metadata["solver_source"] = problem.solver_source
+        metadata["required_solver_source"] = str(required_source)
+        checks.append(
+            _solver_source_check(
+                actual=problem.solver_source,
+                required=str(required_source),
+            )
+        )
+    else:
+        metadata["solver_source"] = problem.solver_source
+    report = replace(report, checks=checks, metadata=metadata, passed=all(check.passed for check in checks))
     path = write_acceptance_report_json(context.output_dir / str(report_name), report)
     return path, report.passed
+
+
+def _solver_source_check(*, actual: str, required: str) -> AcceptanceCheck:
+    return AcceptanceCheck(
+        name="solver_source",
+        category="migration_guardrail",
+        passed=actual == required,
+        value=1.0 if actual == required else 0.0,
+        limit=1.0,
+        message=f"solver_source={actual}, required={required}",
+    )
 
 
 def _write_regression_if_configured(context: AnalysisContext, csv_path: Path | None) -> tuple[Path | None, bool | None]:

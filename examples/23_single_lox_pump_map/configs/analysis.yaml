@@ -1,0 +1,85 @@
+name: single_lox_pump_map
+engine: engine.yaml
+maps:
+  lox_pump_map: maps/lox_pump_map.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+controllers: controller.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: fixed_rk4
+    rtol: 1.0e-7
+    atol: 1.0e-8
+    max_step: 0.05
+analysis:
+  type: profile
+  solve_policy:
+    checked: false
+    residual_tolerance: 1.0e-7
+    strict_sources: true
+    corrector: endpoint
+    corrector_iterations: 2
+    preconditioner: design
+    algebraic_solver: preconditioned_direct
+    max_nfev: 30
+  integration:
+    segment_at_controller_samples: false
+  time:
+    start_s: 0.0
+    end_s: 10.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 2.0
+      - name: tracking
+        start_s: 2.0
+        end_s: 9.0
+      - name: shutdown
+        start_s: 9.0
+        end_s: 10.0
+  design:
+    mdot: 2.4
+    delta_P: 4.6e6
+    pump_speed_rpm: 40000.0
+  initial_conditions:
+    lox_pump.shaft.omega: 0.0
+    control_valve.position: 0.0
+  output:
+    csv: single_lox_pump_map.csv
+    plot: single_lox_pump_map.png
+    diagnostics: single_lox_pump_map.diagnostics.json
+  acceptance:
+    report: single_lox_pump_map.acceptance.json
+    case: single_lox_pump_map_generic_profile
+    require_solver_source: generic_port
+    evaluation_end_s: 8.99
+    required_paths:
+      - lox_pump.delta_P
+      - lox_pump.phi
+      - lox_pump.psi
+      - control_valve.position
+      - control_valve.inlet.mdot
+    tolerances:
+      max_normalized_residual: 1.0e5
+  regression:
+    case: 23_single_lox_pump_map
+    report: single_lox_pump_map.regression.json
+    windows:
+      - name: final_mdot
+        channel: MDOT
+        reducer: max
+        minimum: 2.0
+        maximum: 3.0
+      - name: final_pump_dp
+        channel: PUMP_DP
+        reducer: max
+        minimum: 4.0
+        maximum: 6.0
+      - name: max_pump_speed
+        channel: PUMP_RPM
+        reducer: max
+        minimum: 10000.0
+        maximum: 60000.0

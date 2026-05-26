@@ -1,8 +1,8 @@
 # Example 19: FFSC DAE Acceptance Case
 
-This example is the solved reduced-order FFSC DAE acceptance case and the
-configuration target for the remaining full arbitrary port solve work. It
-intentionally describes the complete target architecture in YAML:
+This example is the FFSC DAE acceptance case running through the generic-port
+profile solver. It intentionally describes the complete target architecture in
+YAML:
 
 - full-flow staged-combustion methalox engine;
 - four preburner branch valves;
@@ -13,7 +13,9 @@ intentionally describes the complete target architecture in YAML:
 - proportional controllers;
 - telemetry export channels.
 
-The current ATHA runner executes this case with a reduced-order FFSC DAE model.
+The default `analysis.yaml` executes the decomposed full-port FFSC network with
+`solver_source: generic_port`. Reports and console output include the solver
+source as a migration guardrail.
 It writes:
 
 - `outputs/ffsc_dae_acceptance.csv`
@@ -22,18 +24,6 @@ It writes:
 - `outputs/ffsc_dae_acceptance.linearization.json`
 - `outputs/ffsc_dae_acceptance.acceptance.json`
 
-The acceptance report validates reduced-model endpoint closure, target
-tracking, shaft response, residual closure, telemetry finiteness, and
-linearization artifact generation.
-
-What is still pending:
-
-- automatic fluid-port unknown generation;
-- connection pressure/enthalpy/mass residuals;
-- pipe inertia residual contracts;
-- chamber/preburner thermochemical residuals;
-- map-backed pump/turbine residuals;
-- true full-port steady trim before transient integration.
-
-Those items are tracked in the retained full-port candidate configuration files
-under this example's `configs/` directory.
+The acceptance report validates endpoint target tracking, shaft response,
+residual closure, telemetry finiteness, and the generic-port solver-source
+guardrail.

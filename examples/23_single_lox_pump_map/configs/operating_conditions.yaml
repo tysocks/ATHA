@@ -1,0 +1,21 @@
+name: single_lox_pump_map_operating_conditions
+targets:
+  mdot:
+    schedule:
+      type: table
+      values:
+        - [0.0, 0.0]
+        - [0.1, 2.4]
+        - [8.999, 2.4]
+        - [9.0, 0.0]
+        - [10.0, 0.0]
+  delta_P:
+    # Pressure targets are SI Pascals. Use 4.6e6 for 4.6 MPa.
+    schedule:
+      type: table
+      values:
+        - [0.0, 0.0]
+        - [0.1, 4.6e6]
+        - [8.999, 4.6e6]
+        - [9.0, 0.0]
+        - [10.0, 0.0]

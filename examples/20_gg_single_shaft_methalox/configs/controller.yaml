@@ -25,8 +25,8 @@ controllers:
     output: methane_generator_valve.command
     parameters:
       bias: 0
-      proportional_gain: -5.5
-      integral_gain: -4
+      proportional_gain: 10.0
+      integral_gain: 1.0
       derivative_gain: 0.0001
       lower_limit: 0.00
       upper_limit: 1.00

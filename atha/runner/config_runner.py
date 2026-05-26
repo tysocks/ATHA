@@ -59,6 +59,7 @@ class ConfigFolderRunner:
             metadata={
                 "analysis_mode": driver_result.mode,
                 "phase_count": len(driver_result.execution_plan.phases),
+                "solver_source": getattr(summary, "solver_source", "unknown"),
                 "artifacts": {key: str(value) for key, value in artifacts.as_dict().items()},
             },
         )

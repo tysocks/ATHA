@@ -1,5 +1,5 @@
 name: ethanol_lox_5kn_two_shaft_gg_telemetry
-sample_rate_hz: 50
+sample_rate_hz: 20
 channels:
   - {alias: TIME, source: time, units: s}
   - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}

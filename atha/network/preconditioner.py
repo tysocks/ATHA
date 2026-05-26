@@ -25,7 +25,7 @@ def precondition_algebraic_guess(
     """Build a design-informed algebraic guess for generic full-port networks.
 
     The preconditioner is intentionally local and topology-driven. It does not
-    solve a reduced cycle or impose acceptance targets; it only pushes port
+    impose acceptance targets; it only pushes port
     pressures, mass flows, properties, and shaft loads toward values implied by
     component design metadata before the nonlinear residual solve starts.
     """
@@ -33,11 +33,13 @@ def precondition_algebraic_guess(
     _ = t
     values = problem.values_from_z(np.asarray(z0, dtype=float))
     numeric_inputs = _numeric_inputs(inputs or {})
+    values.update(numeric_inputs)
     for name in problem.variable_names:
         if name in numeric_inputs:
             values[name] = numeric_inputs[name]
     maps = build_performance_maps(loaded.maps) if loaded.maps else {}
-    for _iteration in range(max(3 * len(loaded.engine.connections), 1)):
+    iterations = int(loaded.analysis_config.analysis.get("solve_policy", {}).get("preconditioner_iterations", 3))
+    for _iteration in range(max(iterations, 1)):
         before = dict(values)
         _apply_boundary_components(values, loaded.engine.components)
         _apply_connections(values, loaded.engine.connections, reverse_default_sources=True)
@@ -45,6 +47,7 @@ def precondition_algebraic_guess(
             _apply_component(values, component, maps)
         _propagate_terminal_demands(values, loaded.engine.components, loaded.engine.connections)
         _apply_connections(values, loaded.engine.connections, reverse_default_sources=False)
+        _propagate_rotor_shaft(values, loaded.engine.components, loaded.engine.connections)
         if _close(before, values):
             break
     z = np.asarray([values.get(name, z0[i]) for i, name in enumerate(problem.variable_names)], dtype=float)
@@ -105,12 +108,30 @@ def _apply_connections(
             target = f"{connection.target}.{prop}"
             if source in values and target in values:
                 values[target] = -values[source] if connection.domain == "shaft" and prop == "tau" else values[source]
-                if prop == "mdot":
-                    _sync_component_mdot(values, target, values[source])
             if reverse_default_sources and source in values and target in values and _looks_default(values[source], prop):
                 values[source] = -values[target] if connection.domain == "shaft" and prop == "tau" else values[target]
-                if prop == "mdot":
-                    _sync_component_mdot(values, source, values[target])
+
+
+def _propagate_rotor_shaft(
+    values: dict[str, float],
+    components: Mapping[str, ComponentConfig],
+    connections: list[ConnectionConfig],
+) -> None:
+    for connection in connections:
+        if connection.domain != "shaft":
+            continue
+        source_component, _source_port = connection.source.split(".", 1)
+        target_component, _target_port = connection.target.split(".", 1)
+        rotor = None
+        if source_component in components and components[source_component].type == "Rotor":
+            rotor = source_component
+        elif target_component in components and components[target_component].type == "Rotor":
+            rotor = target_component
+        if rotor is None:
+            continue
+        omega = _first(values, [f"{rotor}.omega", f"{rotor}.shaft.omega"], _component_speed(components[rotor]))
+        _set(values, f"{connection.source}.omega", omega)
+        _set(values, f"{connection.target}.omega", omega)
 
 
 def _propagate_terminal_demands(
@@ -130,6 +151,11 @@ def _propagate_terminal_demands(
             continue
         upstream = by_target.get(f"{component.name}.{inlet}")
         if upstream is not None:
+            upstream_component = upstream.split(".", 1)[0]
+            upstream_type = components[upstream_component].type if upstream_component in components else ""
+            if upstream_type in {"CombustionChamber", "Preburner", "GasGenerator", "GasVolume", "Volume"}:
+                _set(values, f"{upstream}.mdot", float(mdot))
+                continue
             upstream_mdot = values.get(f"{upstream}.mdot")
             if upstream_mdot is not None and abs(float(upstream_mdot)) > 1.0e-12:
                 _set(values, f"{component.name}.mdot", float(upstream_mdot))
@@ -220,14 +246,20 @@ def _apply_passthrough(values: dict[str, float], component: ComponentConfig) -> 
     if inlet is None:
         return
     mdot = _first(values, [f"{name}.{inlet}.mdot", f"{name}.mdot"], float(component.parameters.get("mdot_design", 0.0)))
+    if component.type in {"Valve", "OrificeCompressible"} and not bool(component.parameters.get("prescribed_mdot", False)):
+        position = min(max(_first(values, [f"{name}.position", f"{name}.A_frac"], 1.0), 0.0), 1.0)
+        mdot *= position
     _set(values, f"{name}.mdot", mdot)
     _set(values, f"{name}.{inlet}.mdot", mdot)
     for outlet in outlets:
+        p_drop = _valve_pressure_drop(values, component, inlet) if component.type in {"Valve", "OrificeCompressible"} else None
         for prop in FLUID_PROPS:
             source = f"{name}.{inlet}.{prop}"
             target = f"{name}.{outlet}.{prop}"
             if prop == "mdot":
                 _set(values, target, mdot)
+            elif prop == "P" and p_drop is not None:
+                _set(values, target, max(_first(values, [source], 101325.0) - p_drop, 1.0))
             elif source in values:
                 values[target] = values[source]
 
@@ -240,11 +272,27 @@ def _apply_splitter(values: dict[str, float], component: ComponentConfig) -> Non
         return
     split = float(component.parameters.get("split_fraction", 0.5))
     mdot_in = _first(values, [f"{name}.{inlet}.mdot"], float(component.parameters.get("mdot_design", 0.0)))
+    mode = str(component.parameters.get("split_mode", component.parameters.get("mode", "fixed_fraction"))).lower()
+    hydraulic = mode in {"hydraulic", "pressure", "demand", "downstream"}
+    hydraulic_mdot: dict[str, float] = {}
+    if hydraulic and len(outlets) == 2:
+        demand_source = component.parameters.get("demand_source")
+        demand_position_source = component.parameters.get("demand_position_source")
+        secondary = outlets[1]
+        if demand_position_source is not None:
+            position = min(max(_first(values, [str(demand_position_source)], 1.0), 0.0), 1.0)
+            secondary_mdot = position * float(component.parameters.get("demand_design_mdot", mdot_in * (1.0 - split)))
+        elif demand_source is not None:
+            secondary_mdot = _first(values, [str(demand_source)], mdot_in * (1.0 - split))
+        else:
+            secondary_mdot = _first(values, [f"{name}.{secondary}.mdot"], mdot_in * (1.0 - split))
+        hydraulic_mdot[outlets[1]] = min(max(secondary_mdot, 0.0), max(mdot_in, 0.0))
+        hydraulic_mdot[outlets[0]] = mdot_in - hydraulic_mdot[outlets[1]]
     for i, outlet in enumerate(outlets):
         fraction = split if i == 0 else (1.0 - split if i == 1 else 0.0)
         for prop in ("P", "h", "T", "rho", "gamma"):
             _set(values, f"{name}.{outlet}.{prop}", _first(values, [f"{name}.{inlet}.{prop}"], _default_prop(prop)))
-        _set(values, f"{name}.{outlet}.mdot", mdot_in * fraction)
+        _set(values, f"{name}.{outlet}.mdot", hydraulic_mdot.get(outlet, mdot_in * fraction))
 
 
 def _apply_injector(values: dict[str, float], component: ComponentConfig) -> None:
@@ -271,11 +319,16 @@ def _apply_finite_volume(values: dict[str, float], component: ComponentConfig) -
     outputs = _ports(component, "fluid_out")
     mdots = {port: _first(values, [f"{name}.{port}.mdot"], 0.0) for port in inputs}
     total = sum(mdots.values())
+    outlet_mdots = {
+        port: _first(values, [f"{name}.{port}.mdot"], total)
+        for port in outputs
+    }
+    mdot_out = sum(outlet_mdots.values()) if outlet_mdots else total
     fuel = sum(value for port, value in mdots.items() if "fuel" in port or "methane" in port)
     oxidizer = sum(value for port, value in mdots.items() if "ox" in port or "lox" in port)
     of = oxidizer / max(fuel, 1.0e-12) if fuel > 0.0 else float(component.parameters.get("design_MR", component.parameters.get("OF", 0.0)))
     t = float(component.parameters.get("T_adiabatic", component.parameters.get("initial_T", 300.0)))
-    p = float(component.parameters.get("initial_P", _first(values, [f"{name}.P"], 101325.0)))
+    p = _first(values, [f"{name}.P"], float(component.parameters.get("initial_P", 101325.0)))
     cp = float(component.parameters.get("cp", component.parameters.get("gas_cp", 3500.0)))
     gas_r = float(component.parameters.get("gas_R", component.parameters.get("R", 355.0)))
     gamma = float(component.parameters.get("gamma", component.parameters.get("gas_gamma", 1.22)))
@@ -285,13 +338,14 @@ def _apply_finite_volume(values: dict[str, float], component: ComponentConfig) -
         f"{name}.P": p,
         f"{name}.OF": of,
         f"{name}.T": t,
-        f"{name}.mdot": total,
+        f"{name}.mdot": mdot_out,
         f"{name}.h": h,
         f"{name}.rho": rho,
         f"{name}.gamma": gamma,
     })
     for outlet in outputs:
-        _set_endpoint(values, f"{name}.{outlet}", {"P": p, "mdot": total, "h": h, "T": t, "rho": rho, "gamma": gamma})
+        outlet_mdot = outlet_mdots.get(outlet, total)
+        _set_endpoint(values, f"{name}.{outlet}", {"P": p, "mdot": outlet_mdot, "h": h, "T": t, "rho": rho, "gamma": gamma})
 
 
 def _apply_turbine(values: dict[str, float], component: ComponentConfig) -> None:
@@ -304,9 +358,11 @@ def _apply_turbine(values: dict[str, float], component: ComponentConfig) -> None
     if inlet is None or outlet is None:
         return
     mdot = abs(_first(values, [f"{name}.{inlet}.mdot", f"{name}.mdot"], float(turbine_map.get("mdot_design", turbine_map.get("mdot_corrected_design", component.parameters.get("mdot_design", 0.0))))))
-    pr = max(float(turbine_map.get("PR_design", component.parameters.get("pressure_ratio", 1.5))), 1.0e-6)
-    eta = float(turbine_map.get("eta_design", component.parameters.get("efficiency", 0.72)))
-    p_in = _first(values, [f"{name}.{inlet}.P"], 101325.0 * pr)
+    eta = float(turbine_map.get("eta_design", component.parameters.get("efficiency", component.parameters.get("efficiency_design", 0.72))))
+    design_pr = max(float(turbine_map.get("PR_design", component.parameters.get("pressure_ratio", 1.5))), 1.0e-6)
+    p_in = _first(values, [f"{name}.{inlet}.P"], 101325.0 * design_pr)
+    p_out = _first(values, [f"{name}.{outlet}.P"], p_in / design_pr)
+    pr = max(p_in / max(p_out, 1.0), 1.0e-6)
     h_in = _first(values, [f"{name}.{inlet}.h"], 1.0e6)
     power = _turbine_power(component, mdot, pr, eta, h_in)
     h_out = h_in - power / max(mdot, 1.0e-12)
@@ -316,7 +372,7 @@ def _apply_turbine(values: dict[str, float], component: ComponentConfig) -> None
         f"{name}.mdot": mdot,
         f"{name}.{inlet}.mdot": mdot,
         f"{name}.{outlet}.mdot": mdot,
-        f"{name}.{outlet}.P": max(p_in / pr, 1.0),
+        f"{name}.{outlet}.P": max(p_out, 1.0),
         f"{name}.{outlet}.h": h_out,
         f"{name}.outlet.h": h_out,
         f"{name}.power": power,
@@ -338,13 +394,16 @@ def _apply_nozzle(values: dict[str, float], component: ComponentConfig) -> None:
     gamma = max(_first(values, [f"{name}.inlet.gamma"], float(component.parameters.get("gamma", 1.22))), 1.0001)
     area = float(component.parameters.get("throat_area", 0.0))
     discharge = float(component.parameters.get("discharge_coeff", component.parameters.get("Cd", 1.0)))
-    if area > 0.0 and p_in > 0.0:
+    c_star_config = float(component.parameters.get("c_star", 0.0))
+    if area > 0.0 and c_star_config > 0.0 and p_in > 0.0:
+        mdot = discharge * p_in * area / max(c_star_config, 1.0e-12)
+    elif area > 0.0 and p_in > 0.0:
         coeff = (2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (2.0 * (gamma - 1.0)))
         mdot = discharge * area * (gamma * rho * p_in) ** 0.5 * coeff
     else:
         mdot = float(component.parameters.get("conductance", 0.0)) * max(p_in - p_amb, 0.0)
     cf = float(component.parameters.get("thrust_coefficient", component.parameters.get("Cf", 1.5)))
-    c_star = p_in * area / max(mdot, 1.0e-12) if area > 0.0 else float(component.parameters.get("c_star", 0.0))
+    c_star = c_star_config if c_star_config > 0.0 else p_in * area / max(mdot, 1.0e-12) if area > 0.0 else 0.0
     thrust = cf * area * max(p_in - p_amb, 0.0) if area > 0.0 else cf * mdot * c_star
     _set_many(values, {
         f"{name}.mdot": mdot,
@@ -373,9 +432,23 @@ def _pump_delta_p(component: ComponentConfig, maps: Mapping[str, Any], mdot: flo
         d_p = _first_map_value(result, ("pressure_rise", "head", "delta_P"))
         if d_p is not None:
             return max(d_p, 0.0)
-    d_p_design = float(pump_map.get("dP_design", params.get("delta_P_design", 0.0)))
+    d_p_design = float(pump_map.get("dP_design", params.get("delta_P_design", params.get("design_delta_P", 0.0))))
     omega_design = max(_design_omega(pump_map.get("speed_design", params.get("omega_design", omega))), 1.0e-12)
     return max(d_p_design * (omega / omega_design) ** 2, 0.0)
+
+
+def _valve_pressure_drop(values: Mapping[str, float], component: ComponentConfig, inlet: str) -> float:
+    name = component.name
+    mdot = abs(_first(values, [f"{name}.mdot", f"{name}.{inlet}.mdot"], float(component.parameters.get("mdot_design", 0.0))))
+    rho = max(_first(values, [f"{name}.{inlet}.rho"], float(component.parameters.get("rho", 1000.0))), 1.0e-12)
+    position = min(max(_first(values, [f"{name}.position", f"{name}.A_frac"], 1.0), 0.0), 1.0)
+    cda = float(component.parameters.get("CdA", 0.0))
+    if cda <= 0.0 and "max_area" in component.parameters:
+        cda = float(component.parameters["max_area"]) * float(component.parameters.get("discharge_coeff", 1.0))
+    cda *= position
+    if cda <= 1.0e-12:
+        return 0.0
+    return mdot * mdot / max(2.0 * rho * cda * cda, 1.0e-30)
 
 
 def _pump_eta(component: ComponentConfig, maps: Mapping[str, Any], mdot: float, rho: float, omega: float) -> float:
@@ -447,6 +520,19 @@ def _first(values: Mapping[str, float], names: list[str], default: float) -> flo
         if name is not None and name in values and np.isfinite(float(values[name])):
             return float(values[name])
     return float(default)
+
+
+def _first_nondefault(values: Mapping[str, float], names: list[str], prop: str, default: float) -> float:
+    fallback: float | None = None
+    for name in names:
+        if name is None or name not in values or not np.isfinite(float(values[name])):
+            continue
+        value = float(values[name])
+        if fallback is None:
+            fallback = value
+        if not _looks_default(value, prop):
+            return value
+    return fallback if fallback is not None else float(default)
 
 
 def _default_prop(prop: str) -> float:

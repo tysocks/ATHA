@@ -1,0 +1,67 @@
+name: single_lox_pump_map_telemetry
+sample_rate_hz: 20
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT, source: target.mdot, units: kg/s}
+  - {alias: TARGET_DP, source: target.delta_P, units: MPa}
+  - {alias: MDOT, source: control_valve.inlet.mdot, units: kg/s}
+  - {alias: PUMP_DP, source: lox_pump.delta_P, units: MPa}
+  - {alias: PUMP_PHI, source: lox_pump.phi}
+  - {alias: PUMP_PSI, source: lox_pump.psi}
+  - {alias: PUMP_EFFICIENCY, source: lox_pump.efficiency}
+  - {alias: PUMP_OMEGA, source: lox_pump.shaft.omega, units: rad/s}
+  - {alias: PUMP_RPM, source: lox_pump.rpm, units: rpm}
+  - {alias: PUMP_RPM_COMMAND, source: pump_speed.command.rpm, units: rpm}
+  - {alias: PUMP_TORQUE, source: lox_pump.tau_load, units: N*m}
+  - {alias: VALVE_COMMAND, source: control_valve.command}
+  - {alias: VALVE_POSITION, source: control_valve.position}
+  - {alias: DP_ERROR, source: controller.pump_dp_pid.error, units: Pa}
+  - {alias: DP_INTEGRAL, source: controller.pump_dp_pid.integral}
+  - {alias: DP_P_TERM, source: controller.pump_dp_pid.proportional_term}
+  - {alias: DP_I_TERM, source: controller.pump_dp_pid.integral_term}
+  - {alias: DP_RAW_COMMAND, source: controller.pump_dp_pid.raw_command}
+  - {alias: MDOT_ERROR, source: controller.valve_mdot_pid.error, units: kg/s}
+  - {alias: MDOT_INTEGRAL, source: controller.valve_mdot_pid.integral}
+  - {alias: MDOT_P_TERM, source: controller.valve_mdot_pid.proportional_term}
+  - {alias: MDOT_I_TERM, source: controller.valve_mdot_pid.integral_term}
+  - {alias: MDOT_RAW_COMMAND, source: controller.valve_mdot_pid.raw_command}
+exports:
+  csv: true
+  plot: true
+plots:
+  - title: Mass Flow Tracking
+    x: TIME
+    y: [TARGET_MDOT, MDOT]
+    ylabel: Mass flow [kg/s]
+  - title: Pressure Rise Tracking
+    x: TIME
+    y: [TARGET_DP, PUMP_DP]
+    ylabel: Pressure rise [MPa]
+  - title: Pump Speed
+    x: TIME
+    y: [PUMP_RPM_COMMAND, PUMP_RPM]
+    ylabel: Speed [rpm]
+  - title: Pump Shaft Torque
+    x: TIME
+    y: [PUMP_TORQUE]
+    ylabel: Torque [N*m]
+  - title: Pump Map Coefficients
+    x: TIME
+    y: [PUMP_PHI, PUMP_PSI, PUMP_EFFICIENCY]
+    ylabel: Coefficient [-]
+  - title: Valve Response
+    x: TIME
+    y: [VALVE_COMMAND, VALVE_POSITION]
+    ylabel: Position [-]
+  - title: Controller Errors
+    x: TIME
+    y: [DP_ERROR, MDOT_ERROR]
+    ylabel: Error
+  - title: Controller Integrals
+    x: TIME
+    y: [DP_INTEGRAL, MDOT_INTEGRAL]
+    ylabel: Integral
+  - title: Controller Raw Commands
+    x: TIME
+    y: [DP_RAW_COMMAND, MDOT_RAW_COMMAND]
+    ylabel: Command

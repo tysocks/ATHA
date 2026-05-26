@@ -1,0 +1,4 @@
+name: single_lox_pump_map_boundaries
+time_unit: s
+conditions:
+  lox_supply.outlet.P: {value: 2.0e5, units: Pa}

@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -21,34 +21,10 @@ from atha.config.schedules import collect_config_breakpoints
 from atha.config.controllers import controller_state_infos
 from atha.config.controllers import controller_evaluation_period, controller_is_active, controller_sample_index
 from atha.config.loader import LoadedAnalysisConfig
-from atha.network import NetworkProblem, WarmStart
+from atha.network import NetworkProblem, NetworkSolution, WarmStart
 from atha.network.preconditioner import precondition_algebraic_guess
 from atha.runner.progress import SolverProgressEvent
 from atha.runner.solver_driver import ExecutionPlan
-
-
-class ReducedCycleExecutionProvider(Protocol):
-    name: str
-    network_problem: NetworkProblem
-
-    def initial_state_overrides(self) -> Mapping[str, float]:
-        ...
-
-    def measurements(self, states: Mapping[str, float], algebraics: Mapping[str, float]) -> Mapping[str, float]:
-        ...
-
-    def solve_algebraics(self, t: float, inputs: Mapping[str, Any]):
-        ...
-
-    def derivatives(
-        self,
-        t: float,
-        states: Mapping[str, float],
-        algebraics: Mapping[str, float],
-        commands: Mapping[str, float],
-        timings: Mapping[str, Any],
-    ) -> Mapping[str, float]:
-        ...
 
 
 @dataclass
@@ -99,6 +75,7 @@ class DAESolvePolicy:
     corrector: str = "none"
     corrector_iterations: int = 1
     preconditioner: str = "none"
+    algebraic_solver: str = "nonlinear"
 
 
 class DAEExecutionProblem:
@@ -118,7 +95,6 @@ class DAEExecutionProblem:
         execution_plan: ExecutionPlan,
         *,
         network_problem: NetworkProblem | None = None,
-        reduced_cycle_provider: ReducedCycleExecutionProvider | None = None,
         progress_callback: Callable[[SolverProgressEvent], None] | None = None,
     ) -> None:
         self.loaded = loaded
@@ -127,17 +103,13 @@ class DAEExecutionProblem:
         self.solve_policy = _dae_solve_policy(loaded, execution_plan)
         self.progress_callback = progress_callback
         self._last_progress_percent = -1.0e9
-        self.reduced_cycle_provider = reduced_cycle_provider
-        self.network_problem = network_problem or (
-            reduced_cycle_provider.network_problem if reduced_cycle_provider is not None else None
-        ) or self.assembler.port_network_problem(
+        self.solver_source = "generic_port"
+        self.network_problem = network_problem or self.assembler.port_network_problem(
             require_square=not self.solve_policy.allow_non_square
         )
         initial_vectors = self.assembler.initial_vectors()
         self.state_names = initial_vectors.state_names
         self.X0 = np.asarray(initial_vectors.X, dtype=float)
-        if reduced_cycle_provider is not None:
-            self._apply_initial_state_overrides(reduced_cycle_provider.initial_state_overrides())
         self.algebraic_names = self.network_problem.variable_names
         self.Z0 = self.network_problem.initial_z.copy()
         self._apply_initial_algebraic_overrides()
@@ -159,6 +131,7 @@ class DAEExecutionProblem:
         self._controller_hold_cache: dict[int, dict[str, Any]] = {}
         self._shaft_couplings = _shaft_couplings(loaded.engine.components, loaded.engine.connections)
         self.balances = balance_configs(loaded.analysis_config.analysis.get("balances", {}))
+        self._initial_trimmed = False
 
     def initial_state(self) -> np.ndarray:
         return self.X0.copy()
@@ -173,6 +146,7 @@ class DAEExecutionProblem:
         for i, name in enumerate(self.state_names):
             if name in point.algebraics:
                 self.X0[i] = float(point.algebraics[name])
+        self._initial_trimmed = True
         return point
 
     def evaluate(self, t: float, x: np.ndarray, warm_start: WarmStart | np.ndarray | None = None) -> DAEPoint:
@@ -225,23 +199,13 @@ class DAEExecutionProblem:
         for i, name in enumerate(self.transient_system.state_names()):
             if name in self._transient_state_indexes:
                 dx[self._transient_state_indexes[name]] = transient_derivatives[i]
-        if self.reduced_cycle_provider is not None:
-            for name, value in self.reduced_cycle_provider.derivatives(
-                t,
-                point.states,
-                point.algebraics,
-                point.commands,
-                point.timings,
-            ).items():
-                index = self._state_index(name)
-                if index is not None:
-                    dx[index] = float(value)
-        else:
-            self._component_derivatives(dx, point)
+        self._component_derivatives(dx, point)
         self._controller_derivatives(dx, point)
         return dx
 
     def integrate(self, sample_times: np.ndarray | None = None) -> DAEExecutionResult:
+        if not self._initial_trimmed:
+            self.trim_initial_conditions()
         self._emit_progress("setup", self.execution_plan.time_start_s, "building sample schedule", force=True)
         time_points = np.asarray(sample_times, dtype=float) if sample_times is not None else self._default_times()
         if time_points.size == 0:
@@ -402,13 +366,55 @@ class DAEExecutionProblem:
             while current < target - 1.0e-12:
                 step = min(float(max_step), target - current)
                 k1 = self.rhs(current, x, z_guess.copy())
-                k2 = self.rhs(current + 0.5 * step, x + 0.5 * step * k1, z_guess.copy())
-                k3 = self.rhs(current + 0.5 * step, x + 0.5 * step * k2, z_guess.copy())
-                k4 = self.rhs(current + step, x + step * k3, z_guess.copy())
-                x = x + (step / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+                k2 = self.rhs(current + 0.5 * step, self._project_state_bounds(x + 0.5 * step * k1), z_guess.copy())
+                k3 = self.rhs(current + 0.5 * step, self._project_state_bounds(x + 0.5 * step * k2), z_guess.copy())
+                k4 = self.rhs(current + step, self._project_state_bounds(x + step * k3), z_guess.copy())
+                x = self._project_state_bounds(x + (step / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4))
                 current += step
             output[target] = x.copy()
         return output
+
+    def _project_state_bounds(self, x: np.ndarray) -> np.ndarray:
+        bounded = np.asarray(x, dtype=float).copy()
+        components = self.loaded.engine.components
+        transient_bounds = self._transient_state_bounds()
+        for i, name in enumerate(self.state_names):
+            if name.endswith(".P"):
+                component_name = name.split(".", 1)[0]
+                component = components.get(component_name)
+                floor = 1.0
+                if component is not None:
+                    floor = float(component.parameters.get("pressure_floor", component.parameters.get("min_pressure", floor)))
+                if bounded[i] < floor:
+                    bounded[i] = floor
+            elif name.endswith(".omega"):
+                component_name = name.split(".", 1)[0]
+                component = components.get(component_name)
+                if component is not None and component.type == "Rotor" and not bool(component.parameters.get("allow_reverse", False)):
+                    floor = float(component.parameters.get("min_omega", 0.0))
+                    if bounded[i] < floor:
+                        bounded[i] = floor
+            if name in transient_bounds:
+                lower, upper = transient_bounds[name]
+                if lower is not None and bounded[i] < lower:
+                    bounded[i] = lower
+                if upper is not None and bounded[i] > upper:
+                    bounded[i] = upper
+        return bounded
+
+    def _transient_state_bounds(self) -> dict[str, tuple[float | None, float | None]]:
+        bounds: dict[str, tuple[float | None, float | None]] = {}
+        for block in self.transient_system.blocks:
+            names = block.state_names
+            if not names:
+                continue
+            lower = block.config.parameters.get("lower_limit", block.config.state.get("lower_limit"))
+            upper = block.config.parameters.get("upper_limit", block.config.state.get("upper_limit"))
+            bounds[names[0]] = (
+                float(lower) if lower is not None else None,
+                float(upper) if upper is not None else None,
+            )
+        return bounds
 
     def _evaluate_points(self, time_points: np.ndarray, X: np.ndarray) -> list[DAEPoint]:
         z_guess = self.Z0.copy()
@@ -470,6 +476,12 @@ class DAEExecutionProblem:
         sample_index = controller_sample_index(t, self._controller_period_s)
         if measurements and sample_index is not None and sample_index in self._controller_hold_cache:
             return dict(self._controller_hold_cache[sample_index])
+        if not measurements and sample_index is not None:
+            if sample_index in self._controller_hold_cache:
+                return dict(self._controller_hold_cache[sample_index])
+            previous = self._controller_hold_cache.get(sample_index - 1)
+            if previous is not None:
+                return dict(previous)
         outputs: dict[str, Any] = {}
         current_phase = self._current_phase(t)
         for name in controller_execution_order(self.loaded.controllers.controllers):
@@ -668,7 +680,10 @@ class DAEExecutionProblem:
             point = self.evaluate(end, corrected_x, corrected_z.copy())
             rhs = self._raw_rhs_from_point(end, corrected_x, point)
             self._apply_state_modes(rhs, corrected_x)
-            corrected_x = np.asarray(x, dtype=float) + dt * rhs
+            candidate_x = np.asarray(x, dtype=float) + dt * rhs
+            for index in (*self._transient_state_indexes.values(), *self._controller_state_indexes.values()):
+                candidate_x[index] = x[index]
+            corrected_x = self._project_state_bounds(candidate_x)
             corrected_z = np.asarray([point.algebraics.get(name, corrected_z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
         point = self.evaluate(end, corrected_x, corrected_z.copy())
         corrected_z = np.asarray([point.algebraics.get(name, corrected_z[i]) for i, name in enumerate(self.algebraic_names)], dtype=float)
@@ -736,14 +751,10 @@ class DAEExecutionProblem:
             point.normalized_residuals[residual_name] = float(raw_dx[index])
 
     def _measurements(self, algebraics: Mapping[str, float], states: Mapping[str, float]) -> dict[str, float]:
-        if self.reduced_cycle_provider is not None:
-            return {
-                key: float(value)
-                for key, value in self.reduced_cycle_provider.measurements(states, algebraics).items()
-                if _is_number(value)
-            }
-        measurements = {**states, **algebraics}
-        measurements.setdefault("mdot_total", float(algebraics.get("mdot.total", algebraics.get("nozzle.mdot", 0.0))))
+        measurements = {**algebraics, **states}
+        mdot_total = float(algebraics.get("mdot.total", algebraics.get("nozzle.mdot", 0.0)))
+        measurements.setdefault("mdot_total", mdot_total)
+        measurements.setdefault("mdot.total", mdot_total)
         if "chamber.OF" in algebraics:
             measurements.setdefault("OF", float(algebraics["chamber.OF"]))
         for name, component in self.loaded.engine.components.items():
@@ -757,6 +768,19 @@ class DAEExecutionProblem:
                     measurements.setdefault(f"{name}.power", power)
                     omega = measurements.get(f"{name}.shaft.omega", measurements.get(f"{name}.omega", 0.0))
                     measurements.setdefault(f"{name}.tau_load", power / max(abs(float(omega)), 1.0))
+                omega_value = measurements.get(f"{name}.shaft.omega", measurements.get(f"{name}.omega"))
+                if omega_value is not None:
+                    measurements.setdefault(f"{name}.rpm", float(omega_value) * 60.0 / (2.0 * np.pi))
+                diameter = float(component.parameters.get("diameter", 0.0))
+                omega = abs(float(measurements.get(f"{name}.shaft.omega", measurements.get(f"{name}.omega", 0.0))))
+                rho = max(float(measurements.get(f"{name}.inlet.rho", 1.0)), 1.0e-12)
+                mdot = abs(float(measurements.get(f"{name}.mdot", measurements.get(f"{name}.inlet.mdot", 0.0))))
+                if diameter > 0.0 and omega > 0.0:
+                    measurements.setdefault(f"{name}.phi", mdot / max(rho * omega * diameter**3, 1.0e-30))
+                    measurements.setdefault(
+                        f"{name}.psi",
+                        float(measurements.get(f"{name}.delta_P", 0.0)) / max(rho * omega**2 * diameter**2, 1.0e-30),
+                    )
             elif component.type == "Turbine":
                 power = _turbine_power(name, measurements)
                 if power:
@@ -768,6 +792,9 @@ class DAEExecutionProblem:
                     cf = float(component.parameters.get("thrust_coefficient", 1.0))
                     area = float(component.parameters.get("throat_area", 0.0))
                     measurements[f"{name}.thrust"] = cf * area * max(float(p_in) - float(p_amb), 0.0)
+        for key, value in list(measurements.items()):
+            if key.endswith(".command") and ("speed" in key or "omega" in key):
+                measurements.setdefault(f"{key}.rpm", float(value) * 60.0 / (2.0 * np.pi))
         return {key: float(value) for key, value in measurements.items() if _is_number(value)}
 
     def _default_times(self) -> np.ndarray:
@@ -807,9 +834,9 @@ class DAEExecutionProblem:
         warm_start: WarmStart | np.ndarray | None,
         network_inputs: Mapping[str, Any],
     ):
-        if self.reduced_cycle_provider is not None:
-            return self.reduced_cycle_provider.solve_algebraics(t, {"inputs": network_inputs})
         warm_start = self._precondition_warm_start(t, warm_start, network_inputs)
+        if self.solve_policy.algebraic_solver in {"preconditioned_direct", "direct", "explicit"}:
+            return self._direct_network_solution(t, warm_start, network_inputs)
         if self.solve_policy.checked:
             return self.network_problem.solve_checked(
                 t,
@@ -820,13 +847,155 @@ class DAEExecutionProblem:
             )
         return self.network_problem.solve_limited(t, warm_start, {"inputs": network_inputs}, max_nfev=self.solve_policy.max_nfev)
 
+    def _direct_network_solution(
+        self,
+        t: float,
+        warm_start: WarmStart | np.ndarray | None,
+        network_inputs: Mapping[str, Any],
+    ) -> NetworkSolution:
+        if isinstance(warm_start, WarmStart):
+            z = warm_start.z.copy()
+        elif warm_start is None:
+            z = self.Z0.copy()
+        else:
+            z = np.asarray(warm_start, dtype=float).copy()
+        z = self._precondition_guess(t, z, network_inputs)
+        z = self._sync_state_owned_algebraics(z, network_inputs)
+        values = self.network_problem.values_from_z(z)
+        evaluated: dict[str, Any] = {}
+        for _ in range(2):
+            evaluated = dict(self.network_problem._evaluator(t, values, {"inputs": network_inputs}))  # type: ignore[attr-defined]
+            changed = self._promote_direct_targets(values, evaluated)
+            if not changed:
+                break
+        evaluated = dict(self.network_problem._evaluator(t, values, {"inputs": network_inputs}))  # type: ignore[attr-defined]
+        residual_vector = np.asarray(
+            [float(evaluated.get(name, 0.0)) for name in self.network_problem.residual_names],
+            dtype=float,
+        )
+        residuals = {
+            name: float(residual_vector[i])
+            for i, name in enumerate(self.network_problem.residual_names)
+        }
+        normalized = {
+            name: float(residual_vector[i] / self.network_problem.residual_scales[i])
+            for i, name in enumerate(self.network_problem.residual_names)
+        }
+        solution = NetworkSolution(
+            z=z,
+            values={
+                **values,
+                **{
+                    key: float(value)
+                    for key, value in evaluated.items()
+                    if key not in self.network_problem.residual_names and _is_number(value)
+                },
+            },
+            residuals=residuals,
+            normalized_residuals=normalized,
+            success=True,
+            message="preconditioned direct algebraic evaluation",
+        )
+        if isinstance(warm_start, WarmStart):
+            warm_start.update(solution)
+        return solution
+
+    def _promote_direct_targets(self, values: dict[str, float], evaluated: Mapping[str, Any]) -> bool:
+        writable = set(self.algebraic_names)
+        changed = False
+        for key, value in evaluated.items():
+            if not _is_number(value) or not key.endswith("_target"):
+                continue
+            target = key[: -len("_target")]
+            if target in writable:
+                new_value = float(value)
+                old_value = float(values.get(target, new_value))
+                if abs(new_value - old_value) > 1.0e-10 * max(abs(old_value), abs(new_value), 1.0):
+                    changed = True
+                values[target] = new_value
+        return changed
+
+    def _propagate_direct_hydraulics(self, values: dict[str, float]) -> bool:
+        changed = False
+        for _ in range(2):
+            pass_changed = False
+            for component in self.loaded.engine.components.values():
+                pass_changed = self._sync_direct_component_flow(values, component) or pass_changed
+            for connection in self.loaded.engine.connections:
+                if connection.domain != "fluid":
+                    continue
+                source = connection.source
+                target = connection.target
+                source_mdot = f"{source}.mdot"
+                target_mdot = f"{target}.mdot"
+                if target_mdot in values and source_mdot in values:
+                    pass_changed = _assign_if_changed(values, source_mdot, float(values[target_mdot])) or pass_changed
+                elif source_mdot in values and target_mdot in values:
+                    pass_changed = _assign_if_changed(values, target_mdot, float(values[source_mdot])) or pass_changed
+            for component in self.loaded.engine.components.values():
+                pass_changed = self._sync_direct_component_flow(values, component) or pass_changed
+            changed = pass_changed or changed
+            if not pass_changed:
+                break
+        return changed
+
+    def _sync_direct_component_flow(self, values: dict[str, float], component: Any) -> bool:
+        name = component.name
+        component_type = component.type
+        changed = False
+        if component_type == "FlowSplitter":
+            mode = str(component.parameters.get("split_mode", component.parameters.get("mode", "fixed_fraction"))).lower()
+            split = float(component.parameters.get("split_fraction", 0.5))
+            inlet = f"{name}.inlet.mdot"
+            out_a = f"{name}.outlet_a.mdot"
+            out_b = f"{name}.outlet_b.mdot"
+            if mode in {"hydraulic", "pressure", "demand", "downstream"}:
+                if inlet in values and out_b in values:
+                    secondary = min(max(float(values[out_b]), 0.0), max(float(values[inlet]), 0.0))
+                    changed = _assign_if_changed(values, out_b, secondary) or changed
+                    changed = _assign_if_changed(values, out_a, float(values[inlet]) - secondary) or changed
+                elif out_a in values and out_b in values:
+                    changed = _assign_if_changed(values, inlet, float(values[out_a]) + float(values[out_b])) or changed
+            elif inlet in values:
+                changed = _assign_if_changed(values, out_a, split * float(values[inlet])) or changed
+                changed = _assign_if_changed(values, out_b, (1.0 - split) * float(values[inlet])) or changed
+        elif component_type in {"Pipe", "Valve", "MassFlowInjector", "OrificeCompressible"}:
+            ports = [
+                port
+                for port, domain in component_spec(component_type).ports.items()
+                if str(domain).startswith("fluid")
+            ]
+            mdot = values.get(f"{name}.mdot")
+            if mdot is None:
+                for port in reversed(ports):
+                    candidate = values.get(f"{name}.{port}.mdot")
+                    if _is_number(candidate):
+                        mdot = float(candidate)
+                        break
+            if _is_number(mdot):
+                changed = _assign_if_changed(values, f"{name}.mdot", float(mdot)) or changed
+                for port in ports:
+                    changed = _assign_if_changed(values, f"{name}.{port}.mdot", float(mdot)) or changed
+        return changed
+
+    def _sync_state_owned_algebraics(self, z: np.ndarray, network_inputs: Mapping[str, Any]) -> np.ndarray:
+        synced = np.asarray(z, dtype=float).copy()
+        for name in self.state_names:
+            if name not in self.algebraic_names:
+                continue
+            value = network_inputs.get(name)
+            if not _is_number(value):
+                continue
+            synced[self.algebraic_names.index(name)] = float(value)
+        return synced
+
     def _precondition_warm_start(
         self,
         t: float,
         warm_start: WarmStart | np.ndarray | None,
         network_inputs: Mapping[str, Any],
     ) -> WarmStart | np.ndarray | None:
-        if self.solve_policy.preconditioner in {"none", "off", "false"} or self.reduced_cycle_provider is not None:
+        if self.solve_policy.preconditioner in {"none", "off", "false"}:
             return warm_start
         if isinstance(warm_start, WarmStart):
             warm_start.z = self._precondition_guess(t, warm_start.z, network_inputs)
@@ -840,7 +1009,7 @@ class DAEExecutionProblem:
         z: np.ndarray,
         network_inputs: Mapping[str, Any],
     ) -> np.ndarray:
-        if self.solve_policy.preconditioner in {"none", "off", "false"} or self.reduced_cycle_provider is not None:
+        if self.solve_policy.preconditioner in {"none", "off", "false"}:
             return np.asarray(z, dtype=float)
         return precondition_algebraic_guess(
             self.loaded,
@@ -879,6 +1048,7 @@ def _dae_solve_policy(loaded: LoadedAnalysisConfig, execution_plan: ExecutionPla
         corrector=str(raw.get("corrector", raw.get("corrector_mode", "none"))),
         corrector_iterations=int(raw.get("corrector_iterations", raw.get("iterations", 1))),
         preconditioner=str(raw.get("preconditioner", "none")).lower(),
+        algebraic_solver=str(raw.get("algebraic_solver", raw.get("solver", "nonlinear"))).lower(),
     )
 
 
@@ -998,6 +1168,7 @@ def _is_optional_alias_port(
     aliases = {
         "lox_inlet": ("ox_inlet",),
         "ox_inlet": ("lox_inlet",),
+        "inlet": ("fuel_inlet", "ox_inlet", "lox_inlet"),
     }.get(port_name)
     if aliases is None:
         return False
@@ -1058,6 +1229,14 @@ def _first_numeric(values: Mapping[str, float], paths: tuple[str, ...], default:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float, np.floating))
+
+
+def _assign_if_changed(values: dict[str, float], key: str, value: float) -> bool:
+    old = values.get(key)
+    values[key] = float(value)
+    if not _is_number(old):
+        return True
+    return abs(float(value) - float(old)) > 1.0e-10 * max(abs(float(value)), abs(float(old)), 1.0)
 
 
 def _largest_abs(values: Mapping[str, float]) -> tuple[str, float]:

@@ -1,0 +1,42 @@
+name: single_lox_pump_map_engine
+units: SI
+components:
+  lox_supply:
+    type: BoundarySource
+    parameters: {P: 2.0e5, T: 95.0, rho: 1140.0, gamma: 1.2, cp: 1700.0}
+  lox_outlet:
+    type: BoundarySink
+    parameters: {P: 101325.0}
+  inlet_pipe:
+    type: Pipe
+    parameters: {length: 0.05, diameter: 0.080, mdot_design: 2.82}
+  lox_pump:
+    type: Pump
+    parameters:
+      diameter: 0.038
+      pump_map:
+        mdot_design: 2.82
+        dP_design: 4.6e6
+        speed_design: 44000.0
+        efficiency_design: 0.731
+        rho_design: 1140.0
+    maps:
+      head_map: {ref: lox_pump_map, output: psi}
+      efficiency_map: {ref: lox_pump_map, output: eta}
+  pump_discharge_pipe:
+    type: Pipe
+    parameters: {length: 0.05, diameter: 0.080, mdot_design: 2.82}
+  control_valve:
+    type: Valve
+    transient: control_valve
+    parameters: {CdA: 8.0e-4}
+  outlet_pipe:
+    type: Pipe
+    parameters: {length: 0.05, diameter: 0.080, mdot_design: 2.82}
+connections:
+  - {from: lox_supply.outlet, to: inlet_pipe.inlet, domain: fluid}
+  - {from: inlet_pipe.outlet, to: lox_pump.inlet, domain: fluid}
+  - {from: lox_pump.outlet, to: pump_discharge_pipe.inlet, domain: fluid}
+  - {from: pump_discharge_pipe.outlet, to: control_valve.inlet, domain: fluid}
+  - {from: control_valve.outlet, to: outlet_pipe.inlet, domain: fluid}
+  - {from: outlet_pipe.outlet, to: lox_outlet.inlet, domain: fluid}

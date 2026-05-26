@@ -36,6 +36,9 @@ class ComponentDerivativeContract(Protocol):
 class PipeDerivativeContract:
     def derivatives(self, component: ComponentConfig, context: DerivativeEvaluationContext) -> dict[str, float]:
         name = component.name
+        inertance = float(component.parameters.get("inertance", component.parameters.get("L_inertance", 0.0)))
+        if inertance > 0.0:
+            return {f"{name}.mdot": context.value(f"{name}.dmdot_dt", 0.0)}
         tau = max(float(component.parameters.get("time_constant", component.parameters.get("tau", 0.0))), 0.0)
         if tau <= 0.0:
             return {f"{name}.mdot": 0.0}
@@ -52,7 +55,12 @@ class FiniteVolumeDerivativeContract:
         temperature = context.value(f"{name}.T", float(component.parameters.get("T_adiabatic", component.parameters.get("initial_T", 300.0))))
         mdot_in = _sum_component_ports(context, name, ("fuel_inlet", "ox_inlet", "lox_inlet", "inlet"))
         mdot_out = _sum_component_ports(context, name, ("outlet",))
-        return {f"{name}.P": gas_r * temperature / volume * (mdot_in - mdot_out)}
+        gain = float(component.parameters.get("pressure_gain", gas_r * temperature / volume))
+        derivative = gain * (mdot_in - mdot_out)
+        pressure_floor = float(component.parameters.get("pressure_floor", 1.0))
+        if context.value(f"{name}.P", pressure_floor) <= pressure_floor and derivative < 0.0:
+            derivative = 0.0
+        return {f"{name}.P": derivative}
 
 
 class RotorDerivativeContract:
@@ -74,7 +82,7 @@ class RotorDerivativeContract:
             power = max(context.value(f"{pump}.power", 0.0), 0.0)
             load_power += power
             load_torque += context.value(f"{pump}.tau_load", power / omega_abs)
-        friction = float(component.parameters.get("friction_coeff", 0.0))
+        friction = float(component.parameters.get("friction_coeff", component.parameters.get("friction", 0.0)))
         torque_balance = drive_torque - load_torque + (drive_power - load_power) / omega_abs - friction * omega
         return {f"{name}.omega": torque_balance / inertia}
 

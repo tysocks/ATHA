@@ -56,7 +56,7 @@ class PortNetworkBuilder:
     thermal port unknowns from `engine.yaml`, adds connection residuals, anchors
     variables to boundary values when provided, and calls registered component
     residual contracts. It is the generic foundation needed before replacing
-    reduced-order compatibility analyses with a universal transient DAE loop.
+    component-level analyses with a universal transient DAE loop.
     """
 
     def __init__(self, loaded: LoadedAnalysisConfig) -> None:
@@ -123,7 +123,7 @@ class PortNetworkBuilder:
                     continue
                 evaluated = contract.evaluate(component, ResidualEvaluationContext(z=z, inputs=values, model=model))
                 values.update({key: value for key, value in evaluated.items() if key not in catalog.residual_names})
-                result.update({key: value for key, value in evaluated.items() if key in catalog.residual_names})
+                result.update(evaluated)
             for connection in self.loaded.engine.connections:
                 result.update(_connection_residual_values(connection, values))
             result.update(_component_coupling_residual_values(self._components, self.loaded.engine.connections, values))
@@ -461,7 +461,7 @@ def _component_coupling_residual_values(
                 load_torque = sum(_value(values, f"{name}.tau_load", _value(values, f"{name}.power", 0.0) / omega) for name in connected["pumps"])
                 drive_power = sum(_value(values, f"{name}.power", 0.0) for name in connected["turbines"])
                 load_power = sum(_value(values, f"{name}.power", 0.0) for name in connected["pumps"])
-                friction = float(component.parameters.get("friction_coeff", 0.0))
+                friction = float(component.parameters.get("friction_coeff", component.parameters.get("friction", 0.0)))
                 result[f"{component.name}.shaft_torque_balance_residual"] = drive_torque - load_torque - friction * omega
                 result[f"{component.name}.shaft_power_balance_residual"] = drive_power - load_power - friction * omega * omega
         if component.type == "Pump" and f"{component.name}.shaft.tau" in values:

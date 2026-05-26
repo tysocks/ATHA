@@ -16,6 +16,7 @@ def main():
     metrics = _csv_metrics(result.csv)
     print("\nMethalox gas-generator single-shaft generic profile")
     print(f"  Solver status   : {result.solver_status}")
+    print(f"  Solver source   : {result.solver_source}")
     print(f"  Final mdot      : {metrics.get('final_mdot', float('nan')):.3f} kg/s")
     print(f"  Peak thrust     : {metrics.get('peak_thrust', float('nan')):.1f} N")
     print(f"  Final thrust    : {metrics.get('final_thrust', float('nan')):.1f} N")

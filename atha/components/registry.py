@@ -119,7 +119,7 @@ def default_component_registry() -> ComponentRegistry:
         ComponentSpec(
             "Valve",
             required_parameters=frozenset(),
-            optional_parameters=frozenset({"max_area", "CdA", "discharge_coeff"}),
+            optional_parameters=frozenset({"max_area", "CdA", "discharge_coeff", "prescribed_mdot"}),
             transient_capable=True,
             model_extractor=_extract_valve_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
@@ -154,7 +154,7 @@ def default_component_registry() -> ComponentRegistry:
     registry.register(
         ComponentSpec(
             "Pipe",
-            optional_parameters=frozenset({"length", "diameter", "time_constant", "friction_factor", "conductance", "mdot_design", "fallback_conductance"}),
+            optional_parameters=frozenset({"length", "diameter", "time_constant", "friction_factor", "conductance", "mdot_design", "initial_mdot", "fallback_conductance", "inertance", "L_inertance"}),
             model_extractor=_extract_pipe_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("mdot",),
@@ -180,7 +180,7 @@ def default_component_registry() -> ComponentRegistry:
     registry.register(
         ComponentSpec(
             "CombustionChamber",
-            optional_parameters=frozenset({"volume", "gas_T", "gas_R", "initial_P", "initial_T", "efficiency", "design_MR", "T_adiabatic"}),
+            optional_parameters=frozenset({"volume", "gas_T", "gas_R", "initial_P", "initial_T", "efficiency", "design_MR", "T_adiabatic", "pressure_gain", "pressure_floor", "mdot_design"}),
             model_extractor=_extract_chamber_model,
             ports={"fuel_inlet": "fluid_in", "ox_inlet": "fluid_in", "lox_inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
@@ -193,8 +193,8 @@ def default_component_registry() -> ComponentRegistry:
     )
     registry.register(
         ComponentSpec(
-            "Nozzle",
-            optional_parameters=frozenset({"throat_area", "exit_area", "conductance", "thrust_coefficient", "efficiencies"}),
+                "Nozzle",
+            optional_parameters=frozenset({"throat_area", "exit_area", "conductance", "thrust_coefficient", "efficiencies", "c_star"}),
             model_extractor=_extract_nozzle_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
             algebraic_variables=("mdot", "thrust", "Cf", "c_star"),
@@ -234,7 +234,7 @@ def default_component_registry() -> ComponentRegistry:
             ports={"inlet": "fluid_in", "outlet": "fluid_out", "shaft": "shaft_in"},
             algebraic_variables=("delta_P", "power", "outlet.h", "tau_load", "efficiency"),
             residual_names=("delta_P_residual", "power_residual", "outlet_h_residual", "tau_load_residual", "efficiency_residual"),
-            output_paths=("mdot", "delta_P", "pressure_rise", "power", "tau_load", "efficiency", "outlet.h"),
+            output_paths=("mdot", "delta_P", "pressure_rise", "power", "tau_load", "efficiency", "phi", "psi", "outlet.h"),
             map_slots=frozenset({"head_map", "efficiency_map"}),
             residual_contract=residual_contract_for_type("Pump"),
         )

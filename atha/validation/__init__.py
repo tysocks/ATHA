@@ -1,7 +1,6 @@
 from atha.validation.acceptance import (
     AcceptanceCheck,
     AcceptanceReport,
-    build_ffsc_reduced_acceptance_report,
     build_generic_port_acceptance_report,
     write_acceptance_report_json,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "PhaseWindow",
     "RegressionCheck",
     "RegressionReport",
-    "build_ffsc_reduced_acceptance_report",
     "build_generic_port_acceptance_report",
     "build_parity_report",
     "build_parity_report_from_files",

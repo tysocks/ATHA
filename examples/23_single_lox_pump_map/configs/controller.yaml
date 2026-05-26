@@ -1,0 +1,29 @@
+name: single_lox_pump_map_controller
+evaluation:
+  frequency_hz: 10.0
+controllers:
+  pump_dp_pid:
+    type: proportional
+    active_phases: [tracking]
+    inputs:
+      target: targets.delta_P
+      measurement: measurements.lox_pump.delta_P
+    output: pump_speed.command
+    parameters:
+      bias: 4900.0
+      feed_forward_gain: 0.0
+      proportional_gain: 1.0e-4
+      lower_limit: 0.0
+      upper_limit: 6000.0
+  valve_mdot_pid:
+    type: proportional
+    active_phases: [tracking]
+    inputs:
+      target: targets.mdot
+      measurement: measurements.control_valve.inlet.mdot
+    output: control_valve.command
+    parameters:
+      bias: 0.85
+      proportional_gain: 0.10
+      lower_limit: 0.02
+      upper_limit: 1.0

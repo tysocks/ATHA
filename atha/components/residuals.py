@@ -147,7 +147,10 @@ class ValveFlowContract:
         cda = _valve_cda(component, context, position)
         d_p = p_in - p_out
         flow_model = str(component.parameters.get("flow_model", component.parameters.get("model", "incompressible"))).lower()
-        if flow_model in {"compressible", "gas"}:
+        if bool(component.parameters.get("prescribed_mdot", False)):
+            mdot_target = context.value(f"{name}.inlet.mdot", context.value(f"{name}.mdot"))
+            choked = 0.0
+        elif flow_model in {"compressible", "gas"}:
             mdot_target, choked = _compressible_orifice_mdot(
                 cda,
                 p_in,
@@ -166,6 +169,9 @@ class ValveFlowContract:
             choked = 0.0
         return {
             f"{name}.mdot_residual": context.value(f"{name}.mdot") - mdot_target,
+            f"{name}.mdot_target": mdot_target,
+            f"{name}.inlet.mdot_target": mdot_target,
+            f"{name}.outlet.mdot_target": mdot_target,
             f"{name}.CdA": cda,
             f"{name}.choked": float(choked),
         }
@@ -207,13 +213,16 @@ class NozzleConductanceContract:
         rho = context.value(f"{name}.inlet.rho", 0.0)
         throat_area = float(component.parameters.get("throat_area", 0.0))
         discharge = float(component.parameters.get("discharge_coeff", component.parameters.get("Cd", 1.0)))
-        if throat_area > 0.0 and rho > 0.0 and p_in > 0.0:
+        configured_c_star = float(component.parameters.get("c_star", 0.0))
+        if throat_area > 0.0 and configured_c_star > 0.0 and p_in > 0.0:
+            mdot_target = discharge * p_in * throat_area / max(configured_c_star, 1.0e-12)
+        elif throat_area > 0.0 and rho > 0.0 and p_in > 0.0:
             choked_coeff = (2.0 / (gamma + 1.0)) ** ((gamma + 1.0) / (2.0 * (gamma - 1.0)))
             mdot_target = discharge * throat_area * (gamma * rho * p_in) ** 0.5 * choked_coeff
         else:
             mdot_target = conductance * max(p_in - p_ambient, 0.0)
         cf = float(component.parameters.get("thrust_coefficient", component.parameters.get("Cf", 1.5)))
-        c_star = p_in * throat_area / max(mdot_target, 1.0e-12) if throat_area > 0.0 else float(component.parameters.get("c_star", 0.0))
+        c_star = configured_c_star if configured_c_star > 0.0 else p_in * throat_area / max(mdot_target, 1.0e-12) if throat_area > 0.0 else 0.0
         thrust_target = cf * throat_area * max(p_in - p_ambient, 0.0) if throat_area > 0.0 else cf * mdot_target * c_star
         return {
             f"{name}.mdot_residual": context.value(f"{name}.mdot") - mdot_target,
@@ -253,6 +262,10 @@ class InjectorPressureDropContract:
                 context.value(f"{name}.inlet.P") - context.value(f"{name}.outlet.P") - delta_p
             ),
             f"{name}.mdot_residual": context.value(f"{name}.mdot") - mdot_target,
+            f"{name}.mdot_target": mdot_target,
+            f"{name}.inlet.mdot_target": mdot_target,
+            f"{name}.outlet.mdot_target": mdot_target,
+            f"{name}.outlet.P_target": max(context.value(f"{name}.inlet.P") - delta_p, 1.0),
         }
 
 
@@ -280,13 +293,33 @@ class FlowSplitterContract:
 
     def evaluate(self, component: ComponentConfig, context: ResidualEvaluationContext) -> dict[str, float]:
         name = component.name
+        mode = str(component.parameters.get("split_mode", component.parameters.get("mode", "fixed_fraction"))).lower()
         split = float(component.parameters.get("split_fraction", 0.5))
         mdot_in = context.value(f"{name}.inlet.mdot")
+        if mode in {"hydraulic", "pressure", "demand", "downstream"}:
+            demand_source = component.parameters.get("demand_source")
+            demand_position_source = component.parameters.get("demand_position_source")
+            if demand_position_source is not None:
+                position = min(max(context.value(str(demand_position_source), 1.0), 0.0), 1.0)
+                outlet_b = position * float(component.parameters.get("demand_design_mdot", (1.0 - split) * mdot_in))
+            elif demand_source is not None:
+                outlet_b = context.value(str(demand_source), (1.0 - split) * mdot_in)
+            else:
+                outlet_b = context.value(f"{name}.outlet_b.mdot", (1.0 - split) * mdot_in)
+            outlet_b = min(max(outlet_b, 0.0), max(mdot_in, 0.0))
+            outlet_a = mdot_in - outlet_b
+        else:
+            outlet_a = split * mdot_in
+            outlet_b = (1.0 - split) * mdot_in
         return {
-            f"{name}.outlet_a.mdot_residual": context.value(f"{name}.outlet_a.mdot") - split * mdot_in,
-            f"{name}.outlet_b.mdot_residual": context.value(f"{name}.outlet_b.mdot") - (1.0 - split) * mdot_in,
+            f"{name}.outlet_a.mdot_residual": context.value(f"{name}.outlet_a.mdot") - outlet_a,
+            f"{name}.outlet_b.mdot_residual": context.value(f"{name}.outlet_b.mdot") - outlet_b,
             f"{name}.outlet_a.h_residual": context.value(f"{name}.outlet_a.h") - context.value(f"{name}.inlet.h"),
             f"{name}.outlet_b.h_residual": context.value(f"{name}.outlet_b.h") - context.value(f"{name}.inlet.h"),
+            f"{name}.outlet_a.mdot_target": outlet_a,
+            f"{name}.outlet_b.mdot_target": outlet_b,
+            f"{name}.outlet_a.h_target": context.value(f"{name}.inlet.h"),
+            f"{name}.outlet_b.h_target": context.value(f"{name}.inlet.h"),
         }
 
 
@@ -325,10 +358,16 @@ class PipeMomentumContract:
         d_p_friction_target = _pipe_friction_dp(component, context.model, rho, mdot)
         inertance = float(component.parameters.get("inertance", component.parameters.get("L_inertance", 0.0)))
         dmdot_dt_input = context.value(f"{name}.state_derivative.mdot", context.value(f"{name}.dmdot_dt", 0.0))
+        if inertance > 0.0:
+            dmdot_dt_target = (d_p - d_p_friction_target) / inertance
+        else:
+            dmdot_dt_target = dmdot_dt_input
         return {
             f"{name}.momentum_residual": d_p - context.value(f"{name}.dP_friction") - inertance * context.value(f"{name}.dmdot_dt"),
             f"{name}.friction_residual": context.value(f"{name}.dP_friction") - d_p_friction_target,
             f"{name}.inertance_residual": context.value(f"{name}.dmdot_dt") - dmdot_dt_input,
+            f"{name}.dP_friction_target": d_p_friction_target,
+            f"{name}.dmdot_dt_target": dmdot_dt_target,
         }
 
 
@@ -528,6 +567,8 @@ class PumpHeadContract:
             f"{name}.outlet_h_residual": context.value(f"{name}.outlet.h") - h_out_target,
             f"{name}.tau_load_residual": context.value(f"{name}.tau_load") - tau_target,
             f"{name}.efficiency_residual": context.value(f"{name}.efficiency") - eta,
+            f"{name}.phi": float(phi) if diameter > 0.0 else 0.0,
+            f"{name}.psi": float(d_p_target / max(rho * omega_safe**2 * diameter**2, 1.0e-30)) if diameter > 0.0 else 0.0,
             f"{name}.efficiency": eta,
             f"{name}.power_target": power_target,
             f"{name}.tau_load_target": tau_target,
@@ -573,7 +614,7 @@ class TurbinePowerContract:
         p_in = context.value(f"{name}.inlet.P", 0.0)
         p_out = context.value(f"{name}.outlet.P", 0.0)
         pressure_ratio_target = p_in / max(p_out, 1.0) if p_in > 0.0 and p_out > 0.0 else float(_nested_param(component, "turbine_map", "PR_design", 1.0))
-        pressure_ratio = max(context.value(f"{name}.pressure_ratio", pressure_ratio_target), 1.0e-6)
+        pressure_ratio = max(pressure_ratio_target, 1.0e-6)
         corrected_flow_ratio = mdot / mdot_design
         map_values = _evaluate_map(
             context,
@@ -612,6 +653,7 @@ class TurbinePowerContract:
             f"{name}.tau_drive_target": tau_target,
             f"{name}.outlet.h_target": h_out_target,
             f"{name}.efficiency": eta,
+            f"{name}.pressure_ratio_target": pressure_ratio_target,
         }
 
 
@@ -631,7 +673,7 @@ class RotorTorqueBalanceContract:
         name = component.name
         tau_drive = context.value(f"{name}.tau_drive")
         tau_load = context.value(f"{name}.tau_load")
-        friction = float(component.parameters.get("friction_coeff", 0.0))
+        friction = float(component.parameters.get("friction_coeff", component.parameters.get("friction", 0.0)))
         omega = context.value(f"{name}.omega", float(component.parameters.get("initial_omega", 0.0)))
         return {f"{name}.torque_balance": tau_drive - tau_load - friction * omega}
 
@@ -797,6 +839,14 @@ def _nested_param(component: ComponentConfig, group: str, key: str, default: Any
     value = component.parameters.get(group, {})
     if isinstance(value, Mapping) and key in value:
         return value[key]
+    aliases = {
+        "dP_design": ("design_delta_P", "delta_P_design", "pressure_rise_design"),
+        "eta_design": ("efficiency_design",),
+        "PR_design": ("pressure_ratio_design", "pressure_ratio"),
+    }
+    for alias in aliases.get(key, ()):
+        if alias in component.parameters:
+            return component.parameters[alias]
     return default
 
 

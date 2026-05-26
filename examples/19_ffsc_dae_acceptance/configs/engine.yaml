@@ -1,6 +1,15 @@
 name: ffsc_dae_acceptance
 units: SI
 components:
+  lox_supply:
+    type: BoundarySource
+    parameters: {P: 4.0e5, T: 91.0, rho: 1140.0, gamma: 1.2, cp: 1700.0}
+  methane_supply:
+    type: BoundarySource
+    parameters: {P: 4.0e5, T: 108.0, rho: 420.0, gamma: 1.2, cp: 3500.0}
+  nozzle_ambient:
+    type: BoundarySink
+    parameters: {P: 101325.0, h: 0.0}
   lox_shaft:
     type: Rotor
     parameters:
@@ -132,6 +141,8 @@ components:
       initial_T: 820.0
       gas_R: 420.0
       T_adiabatic: 950.0
+      pressure_gain: 5.0e5
+      pressure_floor: 1.0e5
   fuel_preburner:
     type: Preburner
     parameters:
@@ -142,6 +153,8 @@ components:
       initial_T: 760.0
       gas_R: 420.0
       T_adiabatic: 900.0
+      pressure_gain: 5.0e5
+      pressure_floor: 1.0e5
 
   ox_pb_to_turbine_pipe:
     type: Pipe
@@ -204,6 +217,8 @@ components:
       initial_T: 3500.0
       gas_R: 420.0
       T_adiabatic: 3600.0
+      pressure_gain: 5.0e5
+      pressure_floor: 1.0e5
   nozzle:
     type: Nozzle
     parameters:
@@ -211,8 +226,12 @@ components:
       exit_area: 2.11e-1
       conductance: 1.02e-5
       thrust_coefficient: 1.45
+      c_star: 1900.0
 
 connections:
+  - from: lox_supply.outlet
+    to: lox_pump.inlet
+    domain: fluid
   - from: lox_pump.outlet
     to: lox_pump_discharge_pipe.inlet
     domain: fluid
@@ -250,6 +269,9 @@ connections:
     to: fuel_preburner.ox_inlet
     domain: fluid
 
+  - from: methane_supply.outlet
+    to: methane_pump.inlet
+    domain: fluid
   - from: methane_pump.outlet
     to: methane_pump_discharge_pipe.inlet
     domain: fluid
@@ -321,6 +343,9 @@ connections:
 
   - from: chamber.outlet
     to: nozzle.inlet
+    domain: fluid
+  - from: nozzle.outlet
+    to: nozzle_ambient.inlet
     domain: fluid
   - from: lox_turbine.shaft
     to: lox_shaft.turbine_in

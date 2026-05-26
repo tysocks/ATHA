@@ -1,5 +1,5 @@
 name: gg_single_shaft_methalox_telemetry
-sample_rate_hz: 100
+sample_rate_hz: 20
 channels:
   - {alias: TIME, source: time, units: s}
   - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
@@ -42,6 +42,9 @@ channels:
   - {alias: MAIN_METHANE_VALVE_POSITION, source: main_methane_valve.position}
   - {alias: GENERATOR_P, source: generator.P, units: bar}
   - {alias: GENERATOR_MDOT, source: generator.mdot, units: kg/s}
+  - {alias: GENERATOR_LOX_MDOT, source: generator.ox_inlet.mdot, units: kg/s}
+  - {alias: GENERATOR_METHANE_MDOT, source: generator.fuel_inlet.mdot, units: kg/s}
+  - {alias: GENERATOR_OF, source: generator.OF}
   - {alias: SHAFT_RPM, source: shaft.rpm, units: rpm}
   - {alias: PC, source: chamber.P, units: bar}
   - {alias: THRUST, source: nozzle.thrust, units: N}
@@ -61,6 +64,14 @@ plots:
     x: TIME
     y: [TARGET_OF, OF]
     ylabel: OF [-]
+  - title: Gas Generator Mixture Ratio
+    x: TIME
+    y: [TARGET_OF, GENERATOR_OF]
+    ylabel: OF [-]
+  - title: Gas Generator Mass Flow
+    x: TIME
+    y: [GENERATOR_MDOT, GENERATOR_LOX_MDOT, GENERATOR_METHANE_MDOT]
+    ylabel: Mass flow [kg/s]
   - title: Methane Generator Valve
     x: TIME
     y: [METHANE_GENERATOR_VALVE_COMMAND, METHANE_GENERATOR_VALVE_POSITION]

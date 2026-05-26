@@ -1,6 +1,18 @@
 name: gg_single_shaft_methalox
 units: SI
 components:
+  lox_supply:
+    type: BoundarySource
+    parameters: {P: 4.0e5, T: 91.0, rho: 1140.0, gamma: 1.2, cp: 1700.0}
+  methane_supply:
+    type: BoundarySource
+    parameters: {P: 4.0e5, T: 108.0, rho: 420.0, gamma: 1.2, cp: 3500.0}
+  turbine_exhaust:
+    type: BoundarySink
+    parameters: {P: 101325.0}
+  nozzle_ambient:
+    type: BoundarySink
+    parameters: {P: 101325.0}
   shaft:
     type: Rotor
     parameters:
@@ -24,19 +36,19 @@ components:
       efficiency_map: {ref: methane_pump_affinity, output: eta}
   lox_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.055, mdot_design: 30.48}}
   methane_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.038, mdot_design: 9.52}}
-  lox_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92}}
-  methane_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92}}
+  lox_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92, split_mode: hydraulic, demand_position_source: lox_generator_valve.position, demand_design_mdot: 0.08}}
+  methane_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92, split_mode: hydraulic, demand_position_source: methane_generator_valve.position, demand_design_mdot: 0.8}}
   lox_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.050, mdot_design: 28.0}}
   methane_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.036, mdot_design: 8.8}}
-  lox_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.020, mdot_design: 2.4}}
+  lox_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.010, mdot_design: 0.08}}
   methane_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.016, mdot_design: 0.8}}
   main_lox_valve: {type: Valve, transient: main_lox_valve, parameters: {CdA: 1.9e-4}}
   main_methane_valve: {type: Valve, transient: main_methane_valve, parameters: {CdA: 1.2e-4}}
-  lox_generator_valve: {type: Valve, transient: lox_generator_valve, parameters: {CdA: 3.5e-5}}
-  methane_generator_valve: {type: Valve, transient: methane_generator_valve, parameters: {CdA: 2.2e-5}}
+  lox_generator_valve: {type: Valve, transient: lox_generator_valve, parameters: {CdA: 1.2e-6, prescribed_mdot: true}}
+  methane_generator_valve: {type: Valve, transient: methane_generator_valve, parameters: {CdA: 2.2e-5, prescribed_mdot: true}}
   lox_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.050, mdot_design: 28.0}}
   methane_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.036, mdot_design: 8.8}}
-  lox_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.020, mdot_design: 2.4}}
+  lox_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.010, mdot_design: 0.08}}
   methane_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.016, mdot_design: 0.8}}
   lox_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e6}}
   methane_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e6}}
@@ -44,21 +56,22 @@ components:
   generator_methane_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 0.8e6}}
   chamber:
     type: CombustionChamber
-    parameters: {volume: 0.08, gas_R: 420.0, T_adiabatic: 3500.0, initial_P: 5.0e6, design_MR: 3.2}
+    parameters: {volume: 0.08, gas_R: 420.0, T_adiabatic: 3500.0, initial_P: 5.0e6, design_MR: 3.2, pressure_gain: 1.0e5, pressure_floor: 1.0e5}
   generator:
     type: Preburner
-    parameters: {volume: 0.004, gas_R: 420.0, T_adiabatic: 1100.0, initial_P: 8.0e6, design_MR: 0.7}
+    parameters: {volume: 0.004, gas_R: 420.0, T_adiabatic: 1100.0, initial_P: 8.0e6, design_MR: 0.1, pressure_gain: 2.0e5, pressure_floor: 1.0e5, mdot_design: 0.88}
   turbine:
     type: Turbine
     parameters:
-      turbine_map: {mdot_design: 3.2, PR_design: 2.5, eta_design: 0.72, power_design: 6.5e5}
+      turbine_map: {mdot_design: 0.88, PR_design: 2.5, eta_design: 0.72, power_design: 6.5e5}
     maps:
       efficiency_map: {ref: turbine_affinity, output: efficiency}
-  turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.60, diameter: 0.045, mdot_design: 3.2}}
+  turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.60, diameter: 0.035, mdot_design: 0.88}}
   nozzle:
     type: Nozzle
-    parameters: {throat_area: 2.11e-2, exit_area: 0.18, thrust_coefficient: 1.45}
+    parameters: {throat_area: 2.11e-2, exit_area: 0.18, thrust_coefficient: 1.45, c_star: 2866.0}
 connections:
+  - {from: lox_supply.outlet, to: lox_pump.inlet, domain: fluid}
   - {from: lox_pump.outlet, to: lox_pump_discharge_pipe.inlet, domain: fluid}
   - {from: lox_pump_discharge_pipe.outlet, to: lox_splitter.inlet, domain: fluid}
   - {from: lox_splitter.outlet_a, to: lox_main_pipe.inlet, domain: fluid}
@@ -71,6 +84,7 @@ connections:
   - {from: lox_generator_valve.outlet, to: lox_generator_valve_pipe.inlet, domain: fluid}
   - {from: lox_generator_valve_pipe.outlet, to: generator_lox_injector.inlet, domain: fluid}
   - {from: generator_lox_injector.outlet, to: generator.ox_inlet, domain: fluid}
+  - {from: methane_supply.outlet, to: methane_pump.inlet, domain: fluid}
   - {from: methane_pump.outlet, to: methane_pump_discharge_pipe.inlet, domain: fluid}
   - {from: methane_pump_discharge_pipe.outlet, to: methane_splitter.inlet, domain: fluid}
   - {from: methane_splitter.outlet_a, to: methane_main_pipe.inlet, domain: fluid}
@@ -85,7 +99,9 @@ connections:
   - {from: generator_methane_injector.outlet, to: generator.fuel_inlet, domain: fluid}
   - {from: generator.outlet, to: turbine.inlet, domain: fluid}
   - {from: turbine.outlet, to: turbine_exhaust_pipe.inlet, domain: fluid}
+  - {from: turbine_exhaust_pipe.outlet, to: turbine_exhaust.inlet, domain: fluid}
   - {from: chamber.outlet, to: nozzle.inlet, domain: fluid}
+  - {from: nozzle.outlet, to: nozzle_ambient.inlet, domain: fluid}
   - {from: turbine.shaft, to: shaft.shaft, domain: shaft}
   - {from: lox_pump.shaft, to: shaft.shaft, domain: shaft}
   - {from: methane_pump.shaft, to: shaft.shaft, domain: shaft}

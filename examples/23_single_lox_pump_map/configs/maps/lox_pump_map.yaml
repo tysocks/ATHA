@@ -1,0 +1,16 @@
+name: lox_pump_map
+kind: scattered
+source:
+  type: csv
+  path: lox_pump_phi_psi.csv
+axes:
+  - name: phi
+    column: phi
+outputs:
+  - name: psi
+    column: psi
+  - name: eta
+    column: eta
+interpolation:
+  method: linear
+

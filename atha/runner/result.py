@@ -22,7 +22,7 @@ class RunResult:
 
     def require_summary(self) -> Any:
         if self.summary is None:
-            raise ValueError("RunResult does not contain a legacy summary object")
+            raise ValueError("RunResult does not contain a summary object")
         return self.summary
 
     def artifact_paths(self) -> dict[str, Path]:

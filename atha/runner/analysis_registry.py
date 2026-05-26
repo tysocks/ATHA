@@ -70,22 +70,6 @@ def default_analysis_registry() -> AnalysisRegistry:
     registry = AnalysisRegistry()
     registry.register(
         AnalysisSpec(
-            type_name="ffsc_dae_transient",
-            handler=_run_ffsc_dae_acceptance,
-            mode="transient",
-            description="Reduced-order FFSC DAE acceptance transient.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
-            type_name="gg_single_shaft_transient",
-            handler=_run_gg_single_shaft,
-            mode="transient",
-            description="Reduced-order methalox gas-generator single-shaft transient.",
-        )
-    )
-    registry.register(
-        AnalysisSpec(
             type_name="port_network_diagnostics",
             handler=_run_port_network_diagnostics,
             mode="steady",
@@ -129,18 +113,6 @@ def default_analysis_registry() -> AnalysisRegistry:
         )
     )
     return registry
-
-
-def _run_ffsc_dae_acceptance(config_path: Path, output_dir: Path) -> object:
-    from atha.analysis.ffsc_acceptance import run_ffsc_dae_transient
-
-    return run_ffsc_dae_transient(config_path, output_dir=output_dir)
-
-
-def _run_gg_single_shaft(config_path: Path, output_dir: Path) -> object:
-    from atha.analysis.gg_single_shaft import run_gg_single_shaft_transient
-
-    return run_gg_single_shaft_transient(config_path, output_dir=output_dir)
 
 
 def _run_port_network_diagnostics(config_path: Path, output_dir: Path) -> object:

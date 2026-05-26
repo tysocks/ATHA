@@ -1,5 +1,5 @@
 name: ffsc_dae_acceptance_telemetry
-sample_rate_hz: 100
+sample_rate_hz: 20
 channels:
   - alias: TIME
     source: time
@@ -81,11 +81,11 @@ plots:
     x: TIME
     y: [MDOT_METHANE, MDOT_LOX]
     ylabel: Mass flow [kg/s]
-  - title: LOx Crossover Valve Control
+  - title: Methane Crossover Valve Control
     x: TIME
     y: [METHANE_CROSSOVER_VALVE_COMMAND, METHANE_CROSSOVER_VALVE_POSITION]
     ylabel: Position [-]
-  - title: Methane Crossover Valve Control
+  - title: LOx Crossover Valve Control
     x: TIME
     y: [LOX_CROSSOVER_VALVE_COMMAND, LOX_CROSSOVER_VALVE_POSITION]
     ylabel: Position [-]

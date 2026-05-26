@@ -1,7 +1,8 @@
 # Example 20: Methalox Single-Shaft Gas Generator
 
-This example is a reduced-order methalox gas-generator cycle used to exercise
-sampled controller updates and shutdown transients.
+The default `analysis.yaml` is a generic-port DAE run for the methalox
+single-shaft gas-generator cycle. Historical alternate configs have been
+removed from the retained example.
 
 Run it with:
 
@@ -22,4 +23,6 @@ The cycle is YAML-defined:
   - LOX generator valve controls mixture ratio.
 - Main propellant valves close at `25 s` through `timings.yaml`.
 
-Outputs are written to `outputs/gg_single_shaft_methalox.*`.
+Outputs are written to `outputs/gg_single_shaft_methalox.*`. Console output,
+provenance, and acceptance reports identify the default run as
+`solver_source: generic_port`.

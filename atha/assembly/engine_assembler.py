@@ -45,7 +45,7 @@ class InitialVectors:
 
 
 class EngineAssembler:
-    """Phase-9 bridge from loaded YAML to model-independent source metadata."""
+    """Create model-independent source metadata from loaded YAML."""
 
     def __init__(self, loaded: LoadedAnalysisConfig) -> None:
         self.loaded = loaded
@@ -70,7 +70,7 @@ class EngineAssembler:
     def residual_network_problem(self, *, require_square: bool = True) -> NetworkProblem:
         """Build a square NetworkProblem from registered component residual contracts.
 
-        This is the Phase-11 component-contract assembly bridge. It intentionally
+        This is the Phase-11 component-contract assembly path. It intentionally
         assembles only component-local residual providers; automatic connection
         port-variable expansion remains Phase 12+ work.
         """
@@ -131,19 +131,33 @@ class EngineAssembler:
             state_values.setdefault(name, float(value))
         for state in controller_state_infos(self.loaded.controllers):
             state_values.setdefault(state.name, float(state.initial))
-        overrides = self.loaded.analysis_config.analysis.get("initial_state", {})
-        if isinstance(overrides, dict):
-            for name, value in overrides.items():
-                state_values[str(name)] = float(value)
+        for overrides in (
+            self.loaded.analysis_config.analysis.get("initial_conditions", {}),
+            self.loaded.analysis_config.analysis.get("initial_state", {}),
+        ):
+            if isinstance(overrides, dict):
+                for name, value in overrides.items():
+                    path = str(name)
+                    if path.endswith(".rpm"):
+                        state_values[f"{path[:-4]}.omega"] = float(value) * 3.141592653589793 / 30.0
+                    else:
+                        state_values[path] = float(value)
 
         problem = self.residual_network_problem(require_square=False)
         z_values = {name: float(value) for name, value in zip(problem.variable_names, problem.initial_z)}
         for balance in balance_configs(self.loaded.analysis_config.analysis.get("balances", {})):
             z_values.setdefault(balance.variable, float(balance.initial))
-        z_overrides = self.loaded.analysis_config.analysis.get("initial_algebraic", {})
-        if isinstance(z_overrides, dict):
-            for name, value in z_overrides.items():
-                z_values[str(name)] = float(value)
+        for z_overrides in (
+            self.loaded.analysis_config.analysis.get("initial_conditions", {}),
+            self.loaded.analysis_config.analysis.get("initial_algebraic", {}),
+        ):
+            if isinstance(z_overrides, dict):
+                for name, value in z_overrides.items():
+                    path = str(name)
+                    if path.endswith(".rpm"):
+                        continue
+                    if path in problem.variable_names:
+                        z_values[path] = float(value)
         return InitialVectors(
             state_names=list(state_values),
             X=[state_values[name] for name in state_values],
@@ -212,7 +226,10 @@ class EngineAssembler:
             if not isinstance(controller, dict):
                 continue
             if "output" in controller:
-                catalog.add(str(controller["output"]))
+                output = str(controller["output"])
+                catalog.add(output)
+                if output.endswith(".command") and ("speed" in output or "omega" in output):
+                    catalog.add(f"{output}.rpm")
             outputs = controller.get("outputs")
             if isinstance(outputs, dict):
                 catalog.update(str(path) for path in outputs.values())
@@ -241,6 +258,8 @@ class EngineAssembler:
             command = config.command.get("path")
             if isinstance(command, str):
                 catalog.add(command)
+                if command.endswith(".command") and ("speed" in command or "omega" in command):
+                    catalog.add(f"{command}.rpm")
 
     def _add_component_sources(self, catalog: SourceCatalog) -> None:
         for component in self.loaded.engine.components.values():
@@ -254,6 +273,8 @@ class EngineAssembler:
                 catalog.update(variable.name for variable in contract.variables(component, model))
                 catalog.update(residual.name for residual in contract.residuals(component, model))
                 catalog.update(f"residuals.{residual.name}" for residual in contract.residuals(component, model))
+            if component.type == "Pump":
+                catalog.add(f"{component.name}.rpm")
             catalog.update(_component_source_paths(component))
 
     def _add_connection_sources(self, catalog: SourceCatalog) -> None:

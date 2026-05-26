@@ -1,60 +1,102 @@
 name: ethanol_lox_5kn_two_shaft_gg_engine
 units: SI
 components:
+  lox_supply:
+    type: BoundarySource
+    parameters: {P: 3.5e5, T: 91.0, rho: 1140.0, gamma: 1.2, cp: 1700.0}
+  fuel_supply:
+    type: BoundarySource
+    parameters: {P: 3.5e5, T: 293.0, rho: 789.0, gamma: 1.2, cp: 2440.0}
+  lox_turbine_exhaust:
+    type: BoundarySink
+    parameters: {P: 101325.0}
+  fuel_turbine_exhaust:
+    type: BoundarySink
+    parameters: {P: 101325.0}
+  nozzle_ambient:
+    type: BoundarySink
+    parameters: {P: 101325.0}
   lox_shaft:
     type: Rotor
-    parameters: {inertia: 0.020, friction: 0.10}
+    parameters: {moment_of_inertia: 0.020, friction_coeff: 0.010}
   fuel_shaft:
     type: Rotor
-    parameters: {inertia: 0.012, friction: 0.12}
+    parameters: {moment_of_inertia: 0.012, friction_coeff: 0.012}
   lox_pump:
     type: Pump
-    parameters: {efficiency: 0.62, design_delta_P: 1.9e6}
+    parameters:
+      diameter: 0.040
+      pump_map: {mdot_design: 1.195, dP_design: 1.9e6, speed_design: 26000.0, efficiency_design: 0.62, rho_design: 1140.0}
   fuel_pump:
     type: Pump
-    parameters: {efficiency: 0.58, design_delta_P: 1.5e6}
-  main_lox_valve:
-    type: Valve
-    transient: main_lox_valve
-    parameters: {CdA: 3.5e-5}
-  main_fuel_valve:
-    type: Valve
-    transient: main_fuel_valve
-    parameters: {CdA: 2.8e-5}
-  lox_generator_valve:
-    type: Valve
-    transient: lox_generator_valve
-    parameters: {CdA: 7.0e-6}
-  fuel_generator_valve:
-    type: Valve
-    transient: fuel_generator_valve
-    parameters: {CdA: 5.5e-6}
-  gas_generator:
-    type: Preburner
-    parameters: {volume: 0.0015}
+    parameters:
+      diameter: 0.034
+      pump_map: {mdot_design: 0.885, dP_design: 1.5e6, speed_design: 30000.0, efficiency_design: 0.58, rho_design: 789.0}
+  lox_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92, mdot_design: 1.195}}
+  fuel_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.90, mdot_design: 0.885}}
+  lox_main_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.016, mdot_design: 1.10}}
+  fuel_main_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.014, mdot_design: 0.80}}
+  lox_generator_pipe: {type: Pipe, parameters: {length: 0.16, diameter: 0.008, mdot_design: 0.095}}
+  fuel_generator_pipe: {type: Pipe, parameters: {length: 0.16, diameter: 0.007, mdot_design: 0.085}}
+  main_lox_valve: {type: Valve, transient: main_lox_valve, parameters: {CdA: 3.5e-5}}
+  main_fuel_valve: {type: Valve, transient: main_fuel_valve, parameters: {CdA: 2.8e-5}}
+  lox_generator_valve: {type: Valve, transient: lox_generator_valve, parameters: {CdA: 7.0e-6}}
+  fuel_generator_valve: {type: Valve, transient: fuel_generator_valve, parameters: {CdA: 5.5e-6}}
+  lox_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.5e5}}
+  fuel_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.5e5}}
+  generator_lox_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e5}}
+  generator_fuel_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e5}}
+  generator:
+    type: GasGenerator
+    parameters: {volume: 0.0015, gas_R: 355.0, T_adiabatic: 1200.0, initial_P: 1.2e6, design_MR: 1.0, pressure_gain: 8.0e4, pressure_floor: 1.0e5, mdot_design: 0.18}
+  generator_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.5, mdot_design: 0.18}}
   lox_turbine:
     type: Turbine
-    parameters: {efficiency: 0.58}
+    parameters:
+      turbine_map: {mdot_design: 0.09, PR_design: 2.0, eta_design: 0.58, power_design: 5.5e3}
   fuel_turbine:
     type: Turbine
-    parameters: {efficiency: 0.56}
+    parameters:
+      turbine_map: {mdot_design: 0.09, PR_design: 2.0, eta_design: 0.56, power_design: 5.0e3}
+  lox_turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.012, mdot_design: 0.09}}
+  fuel_turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.012, mdot_design: 0.09}}
   chamber:
     type: CombustionChamber
-    parameters: {volume: 0.003}
+    parameters: {volume: 0.003, gas_R: 355.0, T_adiabatic: 3200.0, initial_P: 6.0e5, design_MR: 1.35, pressure_gain: 4.0e4, pressure_floor: 1.0e5, mdot_design: 2.08}
   nozzle:
     type: Nozzle
-    parameters: {thrust_coefficient: 1.45}
+    parameters: {throat_area: 6.0e-3, exit_area: 0.030, thrust_coefficient: 1.45, c_star: 1450.0}
 connections:
-  - {from: lox_pump.outlet, to: main_lox_valve.inlet}
-  - {from: fuel_pump.outlet, to: main_fuel_valve.inlet}
-  - {from: main_lox_valve.outlet, to: chamber.lox_inlet}
-  - {from: main_fuel_valve.outlet, to: chamber.fuel_inlet}
-  - {from: lox_generator_valve.outlet, to: gas_generator.lox_inlet}
-  - {from: fuel_generator_valve.outlet, to: gas_generator.fuel_inlet}
-  - {from: gas_generator.outlet, to: lox_turbine.inlet}
-  - {from: gas_generator.outlet, to: fuel_turbine.inlet}
-  - {from: chamber.outlet, to: nozzle.inlet}
-  - {from: lox_turbine.shaft, to: lox_shaft.shaft}
-  - {from: fuel_turbine.shaft, to: fuel_shaft.shaft}
-  - {from: lox_shaft.shaft, to: lox_pump.shaft}
-  - {from: fuel_shaft.shaft, to: fuel_pump.shaft}
+  - {from: lox_supply.outlet, to: lox_pump.inlet, domain: fluid}
+  - {from: lox_pump.outlet, to: lox_splitter.inlet, domain: fluid}
+  - {from: lox_splitter.outlet_a, to: lox_main_pipe.inlet, domain: fluid}
+  - {from: lox_main_pipe.outlet, to: main_lox_valve.inlet, domain: fluid}
+  - {from: main_lox_valve.outlet, to: lox_injector.inlet, domain: fluid}
+  - {from: lox_injector.outlet, to: chamber.lox_inlet, domain: fluid}
+  - {from: lox_splitter.outlet_b, to: lox_generator_pipe.inlet, domain: fluid}
+  - {from: lox_generator_pipe.outlet, to: lox_generator_valve.inlet, domain: fluid}
+  - {from: lox_generator_valve.outlet, to: generator_lox_injector.inlet, domain: fluid}
+  - {from: generator_lox_injector.outlet, to: generator.lox_inlet, domain: fluid}
+  - {from: fuel_supply.outlet, to: fuel_pump.inlet, domain: fluid}
+  - {from: fuel_pump.outlet, to: fuel_splitter.inlet, domain: fluid}
+  - {from: fuel_splitter.outlet_a, to: fuel_main_pipe.inlet, domain: fluid}
+  - {from: fuel_main_pipe.outlet, to: main_fuel_valve.inlet, domain: fluid}
+  - {from: main_fuel_valve.outlet, to: fuel_injector.inlet, domain: fluid}
+  - {from: fuel_injector.outlet, to: chamber.fuel_inlet, domain: fluid}
+  - {from: fuel_splitter.outlet_b, to: fuel_generator_pipe.inlet, domain: fluid}
+  - {from: fuel_generator_pipe.outlet, to: fuel_generator_valve.inlet, domain: fluid}
+  - {from: fuel_generator_valve.outlet, to: generator_fuel_injector.inlet, domain: fluid}
+  - {from: generator_fuel_injector.outlet, to: generator.fuel_inlet, domain: fluid}
+  - {from: generator.outlet, to: generator_splitter.inlet, domain: fluid}
+  - {from: generator_splitter.outlet_a, to: lox_turbine.inlet, domain: fluid}
+  - {from: generator_splitter.outlet_b, to: fuel_turbine.inlet, domain: fluid}
+  - {from: lox_turbine.outlet, to: lox_turbine_exhaust_pipe.inlet, domain: fluid}
+  - {from: fuel_turbine.outlet, to: fuel_turbine_exhaust_pipe.inlet, domain: fluid}
+  - {from: lox_turbine_exhaust_pipe.outlet, to: lox_turbine_exhaust.inlet, domain: fluid}
+  - {from: fuel_turbine_exhaust_pipe.outlet, to: fuel_turbine_exhaust.inlet, domain: fluid}
+  - {from: chamber.outlet, to: nozzle.inlet, domain: fluid}
+  - {from: nozzle.outlet, to: nozzle_ambient.inlet, domain: fluid}
+  - {from: lox_turbine.shaft, to: lox_shaft.shaft, domain: shaft}
+  - {from: lox_pump.shaft, to: lox_shaft.shaft, domain: shaft}
+  - {from: fuel_turbine.shaft, to: fuel_shaft.shaft, domain: shaft}
+  - {from: fuel_pump.shaft, to: fuel_shaft.shaft, domain: shaft}

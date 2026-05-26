@@ -57,6 +57,7 @@ directory is supplied.
 - `examples/21_generic_port_subsystems`
 - `examples/22_ethanol_lox_5kn_two_shaft_gg`
 
-Examples 19 and 20 currently retain reduced-cycle bridge providers for public
-transient behavior while full generic-port candidate configurations continue to
-mature. Those bridge files are intentionally kept in the codebase.
+Examples 19, 20, and 22 run through the generic-port DAE path. Historical
+runner alternatives have been removed from the retained project tree; run
+provenance, acceptance reports, and direct `run.py` output include
+`solver_source` as a generic-port guardrail.

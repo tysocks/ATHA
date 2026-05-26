@@ -17,6 +17,7 @@ def main() -> None:
 
     print("\n5 kN LOX/ethanol two-shaft gas-generator generic profile")
     print(f"  Solver status    : {result.solver_status}")
+    print(f"  Solver source    : {result.solver_source}")
     print(f"  Peak thrust      : {metrics.get('peak_thrust', float('nan')):.1f} N")
     print(f"  Final thrust     : {metrics.get('final_thrust', float('nan')):.1f} N")
     print(f"  Peak mdot        : {metrics.get('peak_mdot', float('nan')):.3f} kg/s")
