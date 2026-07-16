@@ -17,4 +17,5 @@ Subsystems:
 - `pump_shaft_turbine`
 - `preburner_turbine`
 - `chamber_nozzle`
+- `regen_channel` (Workstream 6.1 regen MVP)
 

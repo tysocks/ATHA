@@ -266,7 +266,7 @@ def _is_controller_extension_path(path: str) -> bool:
 
 
 def _validate_controller_shape(name: str, controller_type: str, controller: Mapping[str, Any]) -> None:
-    common_allowed = {"active_phases"}
+    common_allowed = {"active_phases", "inactive_phases", "reset_on_enter", "hold_when_inactive"}
     allowed_by_type = {
         "null": {"type", "input", "output"} | common_allowed,
         "of_mass_flow_split": {"type", "inputs", "outputs"} | common_allowed,

@@ -207,12 +207,16 @@ def default_component_registry() -> ComponentRegistry:
         ComponentSpec(
             "GasVolume",
             required_parameters=frozenset({"volume", "gas_R", "gas_T"}),
-            optional_parameters=frozenset({"gamma"}),
+            optional_parameters=frozenset({"gamma", "initial_P", "initial_T", "initial_h", "cp", "gas_cp", "gas_gamma"}),
             aliases=frozenset({"Volume"}),
             model_extractor=_extract_gas_volume_model,
             ports={"inlet": "fluid_in", "outlet": "fluid_out"},
             state_names=("P", "h"),
-            output_paths=("P", "T", "mdot", "h"),
+            algebraic_variables=("P", "T", "h", "rho", "gamma", "mdot"),
+            residual_names=("pressure_residual", "temperature_residual", "energy_residual", "density_residual", "gamma_residual", "mass_balance_residual"),
+            output_paths=("P", "T", "mdot", "h", "rho", "gamma"),
+            residual_contract=residual_contract_for_type("GasVolume"),
+            derivative_contract=derivative_contract_for_type("GasVolume"),
         )
     )
     registry.register(
@@ -296,10 +300,11 @@ def default_component_registry() -> ComponentRegistry:
             allow_extra_parameters=True,
             ports={"coolant_inlet": "fluid_in", "coolant_outlet": "fluid_out"},
             state_names=("T_wall",),
-            algebraic_variables=("T_wall", "Q_dot"),
-            residual_names=("heat_balance_residual", "wall_temperature_residual"),
+            algebraic_variables=("T_wall", "Q_dot", "Q_hot", "Q_cool"),
+            residual_names=("heat_balance_residual", "wall_temperature_residual", "Q_hot_residual", "Q_cool_residual"),
             output_paths=("coolant_outlet.P", "coolant_outlet.h", "coolant_outlet.mdot", "Q_cool", "Q_hot", "T_wall", "Q_dot"),
             residual_contract=residual_contract_for_type("RegenChannel"),
+            derivative_contract=derivative_contract_for_type("RegenChannel"),
         )
     )
     registry.register(
@@ -311,7 +316,7 @@ def default_component_registry() -> ComponentRegistry:
             algebraic_variables=("P", "OF", "T", "mdot", "h", "rho", "gamma"),
             residual_names=("mass_balance_residual", "OF_residual", "pressure_residual", "temperature_residual", "energy_residual", "density_residual", "gamma_residual"),
             output_paths=("P", "T", "OF", "mdot", "h", "rho", "gamma"),
-            residual_contract=residual_contract_for_type("Preburner"),
+            residual_contract=residual_contract_for_type("GasGenerator"),
             derivative_contract=derivative_contract_for_type("GasGenerator"),
         )
     )

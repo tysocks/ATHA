@@ -18,8 +18,14 @@ from atha.config import (
     evaluate_timing_events,
 )
 from atha.config.schedules import collect_config_breakpoints
-from atha.config.controllers import controller_state_infos
+from atha.config.controllers import controller_reset_state_values, controller_state_infos
 from atha.config.controllers import controller_evaluation_period, controller_is_active, controller_sample_index
+from atha.config.mission_phases import (
+    controller_hold_when_inactive,
+    controller_should_reset_on_enter,
+    detect_phase_transition,
+    resolve_phase_name,
+)
 from atha.config.loader import LoadedAnalysisConfig
 from atha.network import NetworkProblem, NetworkSolution, WarmStart
 from atha.network.preconditioner import precondition_algebraic_guess
@@ -81,12 +87,14 @@ class DAESolvePolicy:
 class DAEExecutionProblem:
     """Universal DAE execution-loop foundation.
 
-    This class owns the common `X/Z/Rz` bookkeeping that compatibility runners
-    previously duplicated or skipped. It evaluates schedules, controllers,
-    transient blocks, state modes, and the port algebraic network through one
-    path. Physical derivatives are still supplied by component models in later
-    phases; today, transient and controller-state derivatives are integrated and
-    other states default to zero unless a caller supplies a derivative hook.
+    This class owns the common `X/Z/Rz` bookkeeping for the production ATHA
+    path. It evaluates schedules, mission phases, controllers, transient blocks,
+    state modes, and the port algebraic network through one path.
+
+    Plant derivatives are supplied by registered component derivative contracts
+    (Pipe, combustors/GG/preburner, Rotor, RegenChannel, GasVolume). Transient
+    actuator states and controller memory are also integrated. Components without
+    a derivative contract remain algebraically closed (or static) by design.
     """
 
     def __init__(
@@ -129,6 +137,8 @@ class DAEExecutionProblem:
         }
         self._controller_period_s = controller_evaluation_period(loaded.controllers)
         self._controller_hold_cache: dict[int, dict[str, Any]] = {}
+        self._inactive_command_hold: dict[str, float] = {}
+        self._previous_phase: str | None = None
         self._shaft_couplings = _shaft_couplings(loaded.engine.components, loaded.engine.connections)
         self.balances = balance_configs(loaded.analysis_config.analysis.get("balances", {}))
         self._initial_trimmed = False
@@ -179,6 +189,8 @@ class DAEExecutionProblem:
         )
 
     def rhs(self, t: float, x: np.ndarray, warm_start: WarmStart | None = None) -> np.ndarray:
+        # Apply phase-entry controller memory resets only on the integration path.
+        self._apply_phase_entry_resets_to_state(t, x)
         point = self.evaluate(t, x, warm_start)
         name, value = _largest_abs(point.normalized_residuals)
         self._emit_progress(
@@ -473,20 +485,25 @@ class DAEExecutionProblem:
     ) -> dict[str, Any]:
         if self.loaded.controllers is None:
             return {}
+        current_phase = self._current_phase(t)
         sample_index = controller_sample_index(t, self._controller_period_s)
         if measurements and sample_index is not None and sample_index in self._controller_hold_cache:
+            self._previous_phase = current_phase
             return dict(self._controller_hold_cache[sample_index])
         if not measurements and sample_index is not None:
             if sample_index in self._controller_hold_cache:
+                self._previous_phase = current_phase
                 return dict(self._controller_hold_cache[sample_index])
             previous = self._controller_hold_cache.get(sample_index - 1)
             if previous is not None:
+                self._previous_phase = current_phase
                 return dict(previous)
         outputs: dict[str, Any] = {}
-        current_phase = self._current_phase(t)
         for name in controller_execution_order(self.loaded.controllers.controllers):
             controller = self.loaded.controllers.controllers[name]
             if not controller_is_active(controller, current_phase):
+                if controller_hold_when_inactive(controller):
+                    outputs.update(self._inactive_controller_hold(name, controller))
                 continue
             ctype = str(controller.get("type", "null"))
             if ctype in {"proportional", "pi", "pid"}:
@@ -508,9 +525,57 @@ class DAEExecutionProblem:
                         previous_outputs=self._controller_hold_cache.get((sample_index or 0) - 1, {}) if sample_index is not None else {},
                     )
                 )
+            self._capture_inactive_hold(name, controller, outputs)
         if measurements and sample_index is not None:
             self._controller_hold_cache[sample_index] = dict(outputs)
+        self._previous_phase = current_phase
         return outputs
+
+    def _apply_phase_entry_resets_to_state(self, t: float, x: np.ndarray) -> None:
+        if self.loaded.controllers is None:
+            return
+        current_phase = self._current_phase(t)
+        transition = detect_phase_transition(self._previous_phase, current_phase, t)
+        if transition is None or not transition.entered or current_phase is None:
+            return
+        reset_applied = False
+        for name, controller in self.loaded.controllers.controllers.items():
+            if not controller_should_reset_on_enter(controller, current_phase):
+                continue
+            for state_name, value in controller_reset_state_values(name, controller).items():
+                index = self._controller_state_indexes.get(state_name)
+                if index is not None:
+                    x[index] = value
+                    self.X0[index] = value
+                    reset_applied = True
+        if reset_applied:
+            self._controller_hold_cache.clear()
+
+    def _capture_inactive_hold(self, name: str, controller: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
+        output = controller.get("output")
+        if isinstance(output, str) and output in outputs and isinstance(outputs[output], (int, float, np.floating)):
+            self._inactive_command_hold[output] = float(outputs[output])
+        output_map = controller.get("outputs")
+        if isinstance(output_map, Mapping):
+            for path in output_map.values():
+                key = str(path)
+                if key in outputs and isinstance(outputs[key], (int, float, np.floating)):
+                    self._inactive_command_hold[key] = float(outputs[key])
+
+    def _inactive_controller_hold(self, name: str, controller: Mapping[str, Any]) -> dict[str, float]:
+        held: dict[str, float] = {}
+        output = controller.get("output")
+        if isinstance(output, str) and output in self._inactive_command_hold:
+            held[output] = self._inactive_command_hold[output]
+            held[f"controller.{name}.command"] = held[output]
+            held[f"controller.{name}.held"] = 1.0
+        output_map = controller.get("outputs")
+        if isinstance(output_map, Mapping):
+            for path in output_map.values():
+                key = str(path)
+                if key in self._inactive_command_hold:
+                    held[key] = self._inactive_command_hold[key]
+        return held
 
     def _feedback_controller(
         self,
@@ -690,15 +755,7 @@ class DAEExecutionProblem:
         return corrected_x, corrected_z, point
 
     def _current_phase(self, t: float) -> str | None:
-        for phase in self.execution_plan.phases:
-            name = getattr(phase, "name", "")
-            if not name:
-                continue
-            start = float(getattr(phase, "start_s"))
-            end = float(getattr(phase, "end_s"))
-            if start <= float(t) < end or (float(t) == end and end == self.execution_plan.time_end_s):
-                return str(name)
-        return None
+        return resolve_phase_name(self.execution_plan.phases, t, self.execution_plan.time_end_s)
 
     def _apply_state_modes(self, dx: np.ndarray, x: np.ndarray) -> None:
         for name, mode in self.execution_plan.state_modes.items():

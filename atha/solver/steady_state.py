@@ -1,3 +1,9 @@
+"""Legacy EngineLayout steady-state helpers.
+
+The canonical production path is ``atha.runner.dae_execution.DAEExecutionProblem``
+with ``PortNetworkBuilder``. Prefer that stack for new models and examples.
+"""
+
 from __future__ import annotations
 import numpy as np
 from typing import Dict, List, Set

@@ -1,0 +1,9 @@
+name: regen_channel_targets
+targets:
+  mdot_coolant:
+    schedule:
+      type: table
+      values:
+        - [0.0, 1.0]
+        - [1.0, 2.5]
+        - [5.0, 2.5]

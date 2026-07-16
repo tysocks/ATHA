@@ -1,0 +1,48 @@
+name: regen_channel_mvp
+engine: engine.yaml
+operating_conditions: operating_conditions.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: fixed_rk4
+    max_step: 0.05
+analysis:
+  type: profile
+  time:
+    start_s: 0.0
+    end_s: 5.0
+    phases:
+      - name: chill
+        start_s: 0.0
+        end_s: 1.0
+      - name: heat_soak
+        start_s: 1.0
+        end_s: 5.0
+  solve_policy:
+    allow_non_square: true
+    checked: false
+    residual_tolerance: 1.0e-6
+    preconditioner: design
+    algebraic_solver: preconditioned_direct
+  initial_conditions:
+    regen.T_wall: 500.0
+  output:
+    csv: regen_channel.csv
+    plot: regen_channel.png
+    diagnostics: regen_channel.diagnostics.json
+  balances:
+    coolant_mdot:
+      residual: {expression: regen.coolant_inlet.mdot - targets.mdot_coolant, scale: 2.5}
+      variable: regen.coolant_inlet.mdot
+      bounds: [0.0, 5.0]
+  acceptance:
+    report: regen_channel.acceptance.json
+    case: regen_channel_mvp
+    require_solver_source: generic_port
+    required_paths:
+      - regen.T_wall
+      - regen.Q_hot
+      - regen.Q_cool
+      - regen.Q_dot
+    tolerances:
+      max_normalized_residual: 1.0e6

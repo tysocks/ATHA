@@ -34,22 +34,22 @@ components:
     maps:
       head_map: {ref: methane_pump_affinity, output: psi}
       efficiency_map: {ref: methane_pump_affinity, output: eta}
-  lox_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.055, mdot_design: 30.48}}
-  methane_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.038, mdot_design: 9.52}}
+  lox_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.055, mdot_design: 30.48}, time_constant: 0.08}
+  methane_pump_discharge_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.038, mdot_design: 9.52}, time_constant: 0.08}
   lox_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92, split_mode: hydraulic, demand_position_source: lox_generator_valve.position, demand_design_mdot: 0.08}}
   methane_splitter: {type: FlowSplitter, parameters: {split_fraction: 0.92, split_mode: hydraulic, demand_position_source: methane_generator_valve.position, demand_design_mdot: 0.8}}
-  lox_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.050, mdot_design: 28.0}}
-  methane_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.036, mdot_design: 8.8}}
-  lox_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.010, mdot_design: 0.08}}
-  methane_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.016, mdot_design: 0.8}}
+  lox_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.050, mdot_design: 28.0}, time_constant: 0.08}
+  methane_main_pipe: {type: Pipe, parameters: {length: 0.50, diameter: 0.036, mdot_design: 8.8}, time_constant: 0.08}
+  lox_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.010, mdot_design: 0.08}, time_constant: 0.08}
+  methane_generator_pipe: {type: Pipe, parameters: {length: 0.35, diameter: 0.016, mdot_design: 0.8}, time_constant: 0.08}
   main_lox_valve: {type: Valve, transient: main_lox_valve, parameters: {CdA: 1.9e-4}}
   main_methane_valve: {type: Valve, transient: main_methane_valve, parameters: {CdA: 1.2e-4}}
   lox_generator_valve: {type: Valve, transient: lox_generator_valve, parameters: {CdA: 1.2e-6, prescribed_mdot: true}}
   methane_generator_valve: {type: Valve, transient: methane_generator_valve, parameters: {CdA: 2.2e-5, prescribed_mdot: true}}
-  lox_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.050, mdot_design: 28.0}}
-  methane_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.036, mdot_design: 8.8}}
-  lox_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.010, mdot_design: 0.08}}
-  methane_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.016, mdot_design: 0.8}}
+  lox_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.050, mdot_design: 28.0}, time_constant: 0.08}
+  methane_main_valve_pipe: {type: Pipe, parameters: {length: 0.25, diameter: 0.036, mdot_design: 8.8}, time_constant: 0.08}
+  lox_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.010, mdot_design: 0.08}, time_constant: 0.08}
+  methane_generator_valve_pipe: {type: Pipe, parameters: {length: 0.20, diameter: 0.016, mdot_design: 0.8}, time_constant: 0.08}
   lox_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e6}}
   methane_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 1.0e6}}
   generator_lox_injector: {type: MassFlowInjector, parameters: {delta_P_nominal: 0.8e6}}
@@ -66,7 +66,7 @@ components:
       turbine_map: {mdot_design: 0.88, PR_design: 2.5, eta_design: 0.72, power_design: 6.5e5}
     maps:
       efficiency_map: {ref: turbine_affinity, output: efficiency}
-  turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.60, diameter: 0.035, mdot_design: 0.88}}
+  turbine_exhaust_pipe: {type: Pipe, parameters: {length: 0.60, diameter: 0.035, mdot_design: 0.88}, time_constant: 0.08}
   nozzle:
     type: Nozzle
     parameters: {throat_area: 2.11e-2, exit_area: 0.18, thrust_coefficient: 1.45, c_star: 2866.0}

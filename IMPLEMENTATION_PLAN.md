@@ -423,6 +423,64 @@ The plan below is organized around the four requested workstreams.
 
 ## 6.1 Workstream 1: implement missing or incomplete package capabilities
 
+### 6.1 status (implementation pass)
+
+| Deliverable | Status | Location / notes |
+| --- | --- | --- |
+| Component maturity matrix | **Completed** | `docs/COMPONENT_MATURITY.md` |
+| Canonical full-engine mission case definition | **Completed** | `docs/CANONICAL_MISSION_CASE.md`; case = `examples/19_ffsc_dae_acceptance` |
+| Missing-physics implementation backlog | **Completed** | `docs/MISSING_PHYSICS_BACKLOG.md` |
+| Cleaned architecture diagram and package map | **Completed** | `docs/ARCHITECTURE.md` |
+| Updated examples demonstrating full mission-cycle flow | **Completed** | Example 19 phases/controllers/targets updated; example 20 pipe dynamics enabled; regen MVP added under example 21 |
+
+#### Code / package changes landed in this pass
+
+- Combustor / preburner / GG enthalpy derivatives (`FiniteVolumeDerivativeContract`)
+- Regen residual heat-load closure + `RegenChannelDerivativeContract`
+- GasVolume / Volume residual + derivative contracts
+- `GasGenerator` residual lookup key registered
+- Mission-phase control formalization:
+  - `atha/config/mission_phases.py`
+  - `active_phases`, `inactive_phases`, `reset_on_enter`, `hold_when_inactive`
+- Legacy path marking for `components/factory.py` and `atha/solver` EngineLayout solvers
+
+#### Deliverables not fully closed, with reasons
+
+1. **Full-engine regen coupling into example 19**  
+   Residual/derivative support and an isolated MVP exist, but the canonical FFSC
+   topology still has no coolant regen branch or chamber-wall thermal ports.
+   Completing this requires engine-YAML redesign plus new acceptance criteria.
+   Tracked in `docs/MISSING_PHYSICS_BACKLOG.md`.
+
+2. **Event-driven sequence / abort state machine**  
+   Timed phase windows and phase-aware controllers are now formalized, but
+   guard-based transitions (threshold crossing, ignition detect, abort) are not
+   implemented. That is a larger control-architecture feature than a 6.1 closure
+   patch. Tracked in the missing-physics backlog.
+
+3. **Chemistry-accurate DAE combustor path**  
+   DAE combustors remain simplified finite-volume models. The Cantera OOP chamber
+   is still legacy-path physics. Unifying them is deferred because it changes
+   residual cost, initialization, and numerical robustness across all engine cases.
+
+4. **OutletInertia and MetalNode first-class DAE support**  
+   Not required by the canonical retained engine cases yet; left explicitly open
+   in the maturity matrix and backlog.
+
+5. **Combustor dynamic enthalpy ODE**  
+   Combustor/preburner/GG `h` is registered as both a state and an algebraic
+   unknown. Integrating `h` while state-owned algebraics sync into `Z` made the
+   energy residual diverge on the canonical mission case. 6.1 keeps the pressure
+   ODE and documents the ownership split as a prerequisite for safe `h` dynamics.
+
+6. **Canonical-case mdot tracking acceptance tightening**  
+   Example 19 still reports `final_mdot_tracking` / `tail_mdot_rms_tracking`
+   failures under the current generic-port tolerances (observed both with the
+   6.1 mission-phase configs and with the prior three-phase configs). Thrust,
+   shaft response, finiteness, and solver-source guardrails pass. Closing the
+   mdot-tracking gap is deferred to Workstream 6.2 verification rather than
+   papering over it with looser tolerances here.
+
 ### Objective
 
 Close the gap between ATHA's current framework and the target of full mission-cycle engine modeling.
@@ -900,15 +958,19 @@ ATHA should be considered to have reached the intended near-term target when it 
 
 ## 9. Immediate next actions
 
-1. Update the top-level README to reflect the current retained examples and actual maturity.
-2. Create a component maturity matrix in markdown.
-3. Select the canonical mission-cycle reference engine.
-4. Convert the subsystem examples into an explicit verification suite.
-5. Prioritize closure of transient derivatives for mission-critical components.
-6. Define the first external comparison cases:
+### Completed in Workstream 6.1
+1. Updated the top-level README to reflect retained examples and actual maturity.
+2. Created the component maturity matrix (`docs/COMPONENT_MATURITY.md`).
+3. Selected and documented the canonical mission-cycle reference engine (example 19).
+4. Formalized mission-phase control semantics and architecture docs.
+5. Closed the first wave of mission-critical derivative/residual gaps (regen, gas volume, GG key, pipe dynamics on example 20).
+
+### Next (start Workstream 6.2)
+1. Convert subsystem examples into an explicit verification suite with physical pass/fail metrics.
+2. Add component MVP comparison cases (valve, pipe, pump map, shaft, chamber/nozzle, regen).
+3. Investigate and fix canonical-case `mdot.total` tracking acceptance.
+4. Define the first external comparison cases:
    - pump map,
    - pump-shaft-turbine,
    - injector-chamber-nozzle,
    - startup controller sequence.
-
-These steps would give ATHA a clear, ROCETS-aligned development path while keeping the package practical, modern, and maintainable in Cursor.

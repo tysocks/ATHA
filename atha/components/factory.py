@@ -1,5 +1,18 @@
+"""Legacy OOP component factory (non-canonical).
+
+.. deprecated::
+    The production ATHA path is YAML → ``EngineAssembler`` / ``PortNetworkBuilder``
+    → residual/derivative contracts → ``DAEExecutionProblem``.
+
+    This factory only constructs a small subset of OOP ``BaseComponent`` objects
+    (Valve, MassFlowInjector, CombustionChamber, Nozzle) for the older
+    ``Engine`` / ``EngineLayout`` solver path under ``atha.solver``. New models
+    and examples should not call ``build_component_from_config``.
+"""
+
 from __future__ import annotations
 
+import warnings
 from typing import Any, Mapping
 
 from atha.components.combustion_chamber import CombustionChamber
@@ -13,13 +26,19 @@ from atha.thermo.cantera_backend import CanteraBackend
 
 
 def build_component_from_config(config: ComponentConfig, context: Mapping[str, Any]):
-    """Instantiate a component from its YAML config.
+    """Instantiate a legacy OOP component from its YAML config.
 
-    This is the first small piece of a ROCETS-like Configuration Processor. The
-    registry is intentionally conservative; unsupported types fail loudly rather
-    than falling back to ad hoc example logic.
+    Prefer residual/derivative contracts and the generic-port DAE runner for all
+    new work. This helper remains only for compatibility with the older
+    ``EngineLayout`` solvers.
     """
 
+    warnings.warn(
+        "atha.components.factory.build_component_from_config is a legacy path; "
+        "use PortNetworkBuilder / DAEExecutionProblem for new models.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     params = _coerce_numbers(dict(config.parameters))
     ctype = config.type
     if ctype == "Valve":
@@ -40,7 +59,11 @@ def build_component_from_config(config: ComponentConfig, context: Mapping[str, A
         if efficiencies is not None:
             params["efficiencies"] = JANNAFEfficiencies(**efficiencies)
         return Nozzle(config.name, **params)
-    raise ConfigError(f"Unsupported component type for factory construction: {ctype}. Known types: {known_component_types()}")
+    raise ConfigError(
+        f"Unsupported component type for legacy factory construction: {ctype}. "
+        f"Known registry types: {known_component_types()}. "
+        "Use the generic-port residual/derivative contracts instead."
+    )
 
 
 def _coerce_numbers(value: Any) -> Any:
