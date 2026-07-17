@@ -809,9 +809,9 @@ class DAEExecutionProblem:
 
     def _measurements(self, algebraics: Mapping[str, float], states: Mapping[str, float]) -> dict[str, float]:
         measurements = {**algebraics, **states}
-        mdot_total = float(algebraics.get("mdot.total", algebraics.get("nozzle.mdot", 0.0)))
-        measurements.setdefault("mdot_total", mdot_total)
-        measurements.setdefault("mdot.total", mdot_total)
+        mdot_total = _aggregate_total_mdot(algebraics, self.loaded.engine.components)
+        measurements["mdot_total"] = mdot_total
+        measurements["mdot.total"] = mdot_total
         if "chamber.OF" in algebraics:
             measurements.setdefault("OF", float(algebraics["chamber.OF"]))
         for name, component in self.loaded.engine.components.items():
@@ -1282,6 +1282,58 @@ def _first_numeric(values: Mapping[str, float], paths: tuple[str, ...], default:
         if path in values and _is_number(values[path]):
             return float(values[path])
     return float(default)
+
+
+def _aggregate_total_mdot(
+    algebraics: Mapping[str, float],
+    components: Mapping[str, Any],
+) -> float:
+    """Resolve total propellant mass flow for controllers and telemetry.
+
+    Priority:
+    1. Explicit algebraic trim variable ``mdot.total``.
+    2. Sum of pump inlet flows (primary path for turbopump-fed engines).
+    3. Sum of combustor / preburner / GG inlet flows.
+    4. Component ``*.mdot`` totals.
+    5. Nozzle throat flow as a last resort.
+    """
+
+    if "mdot.total" in algebraics:
+        return float(algebraics["mdot.total"])
+
+    pump_total = 0.0
+    pump_count = 0
+    for name, component in components.items():
+        if getattr(component, "type", "") != "Pump":
+            continue
+        mdot = _first_numeric(
+            algebraics,
+            (f"{name}.inlet.mdot", f"{name}.mdot"),
+            float("nan"),
+        )
+        if np.isfinite(mdot):
+            pump_total += abs(mdot)
+            pump_count += 1
+    if pump_count > 0:
+        return pump_total
+
+    combustor_total = 0.0
+    combustor_ports = 0
+    for name, component in components.items():
+        if getattr(component, "type", "") not in {"CombustionChamber", "Preburner", "GasGenerator"}:
+            continue
+        component_mdot = algebraics.get(f"{name}.mdot")
+        if component_mdot is not None:
+            return abs(float(component_mdot))
+        for port in ("fuel_inlet", "ox_inlet", "lox_inlet", "inlet"):
+            path = f"{name}.{port}.mdot"
+            if path in algebraics:
+                combustor_total += abs(float(algebraics[path]))
+                combustor_ports += 1
+    if combustor_ports > 0:
+        return combustor_total
+
+    return float(algebraics.get("nozzle.mdot", 0.0))
 
 
 def _is_number(value: Any) -> bool:

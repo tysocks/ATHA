@@ -293,7 +293,13 @@ def _lookup_signal(
     if path.startswith("timings."):
         return timings[path[len("timings."):]]
     if path.startswith("measurements."):
-        return measurements[path[len("measurements."):]]
+        key = path[len("measurements.") :]
+        if key in measurements:
+            return measurements[key]
+        dotted = key.replace("_", ".")
+        if dotted in measurements:
+            return measurements[dotted]
+        raise ValueError(f"Unknown controller signal: {path}")
     if path in commands:
         return commands[path]
     if path in targets:

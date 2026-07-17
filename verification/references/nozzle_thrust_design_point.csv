@@ -1,0 +1,6 @@
+parameter,value,units,notes
+thrust_coefficient,1.5,-,
+throat_area,0.01,m2,
+chamber_pressure,5000000,Pa,
+ambient_pressure,101325,Pa,
+expected_thrust,73480.125,N,Cf*At*(Pc-Pa)

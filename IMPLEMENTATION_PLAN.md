@@ -587,6 +587,45 @@ Perform a package-level cleanup pass:
 
 ## 6.2 Workstream 2: verification of each component model, including MVP test setups against other models
 
+### 6.2 status (implementation pass)
+
+| Deliverable | Status | Location / notes |
+| --- | --- | --- |
+| Formal 4-level verification hierarchy | **Completed** | `docs/VERIFICATION_MATRIX.md`, `docs/VERIFICATION_GUIDE.md` |
+| Component / subsystem verification matrix | **Completed** | `docs/VERIFICATION_MATRIX.md` |
+| MVP case library + reference tables | **Completed** | `verification/references/` |
+| Analytical comparison harness | **Completed** | `atha/validation/reference_checks.py` |
+| Automated verification suite runner | **Completed** | `atha/validation/verification_suite.py`, `examples/21_generic_port_subsystems/run_verification_suite.py` |
+| Pytest gates (level 0, 2, 3) | **Completed** | `tests/test_level0_reference_checks.py`, `tests/test_verification_subsystems.py`, `tests/test_verification_engine.py` |
+| Subsystem example promotion | **Completed** | Example 21 README + reference checks for `regen_channel`, `chamber_nozzle` |
+| Canonical FFSC mdot tracking fix | **Completed** | `DAEExecutionProblem._aggregate_total_mdot()`; example 19 acceptance **PASS** |
+| First full-engine reference report | **Completed** | `docs/reports/FFSC_CANONICAL_VERIFICATION_REPORT.md` |
+
+#### Code / package changes landed in this pass
+
+- `mdot.total` measurement now sums pump inlet flows when no explicit trim variable exists
+- Controller `measurements.*` lookup accepts underscore / dotted aliases
+- `atha/validation/reference_checks.py` — orifice, nozzle, pump affinity, CSV comparison helpers
+- `atha/validation/verification_suite.py` — case registry and batch runner
+- `tests/` pytest suite with `slow` marker for full-engine gate
+- `verification/references/` design-point CSV tables
+- `pyproject.toml` optional `[test]` extra with pytest configuration
+
+#### Deliverables not fully closed, with reasons
+
+1. **GFSSP / FullFlow / ROCETS exported trace overlays**  
+   Parity mode exists but no retained example wires `analysis.type: parity` yet.
+   Reference tables provide analytical substitutes until external exports are added.
+
+2. **Per-component analytical MVP configs outside example 21**  
+   Valve orifice and pump map design-point tables exist; dedicated standalone MVP
+   config folders were deferred in favor of promoting the existing subsystem suite.
+
+3. **Powered thrust sustainment on example 19 after t≈1 s**  
+   mdot tracking acceptance now passes, but thrust still collapses to ~2.4 kN while
+   pump inlet flows remain at design values. Documented as open physics in the
+   FFSC verification report; not a measurement artifact.
+
 ### Objective
 
 Build a verification ladder from component to subsystem to engine, using repeatable MVP cases.
@@ -965,12 +1004,15 @@ ATHA should be considered to have reached the intended near-term target when it 
 4. Formalized mission-phase control semantics and architecture docs.
 5. Closed the first wave of mission-critical derivative/residual gaps (regen, gas volume, GG key, pipe dynamics on example 20).
 
-### Next (start Workstream 6.2)
-1. Convert subsystem examples into an explicit verification suite with physical pass/fail metrics.
-2. Add component MVP comparison cases (valve, pipe, pump map, shaft, chamber/nozzle, regen).
-3. Investigate and fix canonical-case `mdot.total` tracking acceptance.
-4. Define the first external comparison cases:
-   - pump map,
-   - pump-shaft-turbine,
-   - injector-chamber-nozzle,
-   - startup controller sequence.
+### Next (start Workstream 6.3)
+1. Add lint/format baseline (Ruff) and a lightweight performance benchmark suite.
+2. Refresh README contributor paths to reference verification docs.
+3. Reduce legacy path surface area called out in `docs/ARCHITECTURE.md`.
+4. Add the first parity example once a frozen reference CSV is chosen.
+
+### Completed in Workstream 6.2
+1. Formalized the verification ladder and matrix documentation.
+2. Promoted example 21 into an automated subsystem verification suite with pytest gates.
+3. Added analytical reference-check harness and design-point tables.
+4. Fixed canonical-case `mdot.total` tracking and closed example 19 acceptance.
+5. Published the first FFSC canonical verification report.

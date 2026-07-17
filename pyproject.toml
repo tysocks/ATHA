@@ -18,8 +18,19 @@ dependencies = [
     "h5py>=3.10",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 atha-run = "atha.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["atha*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: full-engine mission-cycle verification gates",
+]
+testpaths = ["tests"]
