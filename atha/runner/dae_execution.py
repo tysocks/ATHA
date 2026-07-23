@@ -112,6 +112,9 @@ class DAEExecutionProblem:
         self.progress_callback = progress_callback
         self._last_progress_percent = -1.0e9
         self.solver_source = "generic_port"
+        self._runtime_maps = self.assembler.runtime_maps
+        self.algebraic_solve_count = 0
+        self.algebraic_solve_skip_count = 0
         self.network_problem = network_problem or self.assembler.port_network_problem(
             require_square=not self.solve_policy.allow_non_square
         )
@@ -165,16 +168,19 @@ class DAEExecutionProblem:
         boundaries = evaluate_boundary_conditions(self.loaded.boundary_conditions, t) if self.loaded.boundary_conditions is not None else {}
         timings = evaluate_timing_events(self.loaded.timings, t)
         transient_state = self._transient_state_vector(x)
-        commands = self._evaluate_controllers(t, targets, timings, {}, states)
-        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+        open_loop_commands = self._evaluate_controllers(t, targets, timings, {}, states)
+        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **open_loop_commands})
+        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, open_loop_commands, transient_sources)
         solution = self._solve_network(t, warm_start, network_inputs)
         measurements = self._measurements(solution.values, states)
         commands = self._evaluate_controllers(t, targets, timings, measurements, states)
-        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
-        solution = self._solve_network(t, warm_start, network_inputs)
-        measurements = self._measurements(solution.values, states)
+        if _command_maps_equal(open_loop_commands, commands):
+            self.algebraic_solve_skip_count += 1
+        else:
+            transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
+            network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+            solution = self._solve_network(t, warm_start, network_inputs)
+            measurements = self._measurements(solution.values, states)
         return DAEPoint(
             time=float(t),
             states=states,
@@ -489,15 +495,15 @@ class DAEExecutionProblem:
         sample_index = controller_sample_index(t, self._controller_period_s)
         if measurements and sample_index is not None and sample_index in self._controller_hold_cache:
             self._previous_phase = current_phase
-            return dict(self._controller_hold_cache[sample_index])
+            return self._controller_hold_cache[sample_index]
         if not measurements and sample_index is not None:
             if sample_index in self._controller_hold_cache:
                 self._previous_phase = current_phase
-                return dict(self._controller_hold_cache[sample_index])
+                return self._controller_hold_cache[sample_index]
             previous = self._controller_hold_cache.get(sample_index - 1)
             if previous is not None:
                 self._previous_phase = current_phase
-                return dict(previous)
+                return previous
         outputs: dict[str, Any] = {}
         for name in controller_execution_order(self.loaded.controllers.controllers):
             controller = self.loaded.controllers.controllers[name]
@@ -891,6 +897,7 @@ class DAEExecutionProblem:
         warm_start: WarmStart | np.ndarray | None,
         network_inputs: Mapping[str, Any],
     ):
+        self.algebraic_solve_count += 1
         warm_start = self._precondition_warm_start(t, warm_start, network_inputs)
         if self.solve_policy.algebraic_solver in {"preconditioned_direct", "direct", "explicit"}:
             return self._direct_network_solution(t, warm_start, network_inputs)
@@ -1074,6 +1081,7 @@ class DAEExecutionProblem:
             t,
             np.asarray(z, dtype=float),
             {"inputs": network_inputs},
+            maps=self._runtime_maps,
         )
 
 
@@ -1334,6 +1342,25 @@ def _aggregate_total_mdot(
         return combustor_total
 
     return float(algebraics.get("nozzle.mdot", 0.0))
+
+
+def _command_maps_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Return True when controller command maps are numerically equal."""
+
+    if left is right:
+        return True
+    if len(left) != len(right):
+        return False
+    for key, value in left.items():
+        if key not in right:
+            return False
+        other = right[key]
+        if _is_number(value) and _is_number(other):
+            if abs(float(value) - float(other)) > 1.0e-12 * max(abs(float(value)), abs(float(other)), 1.0):
+                return False
+        elif value != other:
+            return False
+    return True
 
 
 def _is_number(value: Any) -> bool:

@@ -44,6 +44,8 @@ class GenericDAESummary:
     residual_names: list[str] | None = None
     integration_segments: list[dict[str, Any]] | None = None
     solver_source: str = "generic_port"
+    algebraic_solve_count: int | None = None
+    algebraic_solve_skip_count: int | None = None
 
 
 def run_generic_steady(context: AnalysisContext) -> GenericDAESummary:
@@ -147,6 +149,8 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
         residual_names=result.residual_names,
         integration_segments=integration_segments,
         solver_source=problem.solver_source,
+        algebraic_solve_count=problem.algebraic_solve_count,
+        algebraic_solve_skip_count=problem.algebraic_solve_skip_count,
     )
 
 

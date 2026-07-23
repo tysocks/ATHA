@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 
@@ -9,7 +10,6 @@ from atha.config import build_performance_maps
 from atha.config.loader import LoadedAnalysisConfig
 from atha.config.schema import ComponentConfig, ConnectionConfig
 from atha.network.problem import NetworkProblem
-
 
 FLUID_PROPS = ("P", "mdot", "h", "T", "rho", "gamma")
 SHAFT_PROPS = ("omega", "tau")
@@ -21,6 +21,8 @@ def precondition_algebraic_guess(
     t: float,
     z0: np.ndarray,
     inputs: Mapping[str, Any] | None = None,
+    *,
+    maps: Mapping[str, Any] | None = None,
 ) -> np.ndarray:
     """Build a design-informed algebraic guess for generic full-port networks.
 
@@ -28,6 +30,9 @@ def precondition_algebraic_guess(
     impose acceptance targets; it only pushes port
     pressures, mass flows, properties, and shaft loads toward values implied by
     component design metadata before the nonlinear residual solve starts.
+
+    Pass ``maps`` when the caller already built runtime performance maps so the
+    preconditioner does not re-parse YAML map tables on every algebraic solve.
     """
 
     _ = t
@@ -37,7 +42,7 @@ def precondition_algebraic_guess(
     for name in problem.variable_names:
         if name in numeric_inputs:
             values[name] = numeric_inputs[name]
-    maps = build_performance_maps(loaded.maps) if loaded.maps else {}
+    maps = dict(maps) if maps is not None else (build_performance_maps(loaded.maps) if loaded.maps else {})
     iterations = int(loaded.analysis_config.analysis.get("solve_policy", {}).get("preconditioner_iterations", 3))
     for _iteration in range(max(iterations, 1)):
         before = dict(values)

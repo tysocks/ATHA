@@ -762,6 +762,39 @@ For every verification case, produce:
 
 ## 6.3 Workstream 3: improve package quality, reduce bloat, increase user performance, and update documentation
 
+### 6.3 status (implementation pass)
+
+| Deliverable | Status | Location / notes |
+| --- | --- | --- |
+| Architectural bloat reduction / clearer legacy marking | **Completed** | Expanded `docs/ARCHITECTURE.md` legacy table; marked `atha.examples`, `atha.solver.nonlinear` |
+| Runtime performance improvements | **Completed** | Cached source catalog; reused runtime maps in preconditioner; skip second network solve when commands unchanged; controller cache returns by reference |
+| Lightweight benchmark suite | **Completed** | `atha/benchmarks/`, `scripts/run_benchmarks.py` (fast / medium / slow cases) |
+| Lint / format baseline (Ruff) | **Completed** | `[tool.ruff]` in `pyproject.toml`; optional `[dev]` extra |
+| Updated README + architecture | **Completed** | `README.md`, `docs/ARCHITECTURE.md` |
+| Contributor guide | **Completed** | `CONTRIBUTING.md` |
+| Verification docs linked from README | **Completed** | Points to `VERIFICATION_GUIDE.md` / `VERIFICATION_MATRIX.md` |
+
+#### Code / package changes landed in this pass
+
+- `EngineAssembler.source_catalog()` memoization + `runtime_maps` property
+- `precondition_algebraic_guess(..., maps=)` optional reuse of assembled maps
+- `DAEExecutionProblem.evaluate()` skips redundant second algebraic solve
+- Algebraic solve / skip counters exposed on `GenericDAESummary`
+- Ruff + pytest quality helpers under `tests/test_quality_and_benchmarks.py`
+
+#### Deliverables not fully closed, with reasons
+
+1. **Hard deletion of legacy solver / factory modules**  
+   Still referenced by dual-use OOP components and optional EngineLayout helpers.
+   Marked clearly instead of deleting in this pass to avoid breaking physics-reference imports.
+
+2. **Whole-repo Ruff autoformat / zero-warning gate**  
+   Ruff is configured and documented; a strict CI fail-on-all-warnings gate is deferred
+   until a dedicated formatting cleanup PR can land without mixing physics diffs.
+
+3. **mypy / pyright on core modules**  
+   Explicitly deferred until network/config interfaces stabilize further (per plan 3D).
+
 ### Objective
 
 Make ATHA easier to maintain, faster to run, and easier for a new user in Cursor to understand and extend.
@@ -1004,15 +1037,22 @@ ATHA should be considered to have reached the intended near-term target when it 
 4. Formalized mission-phase control semantics and architecture docs.
 5. Closed the first wave of mission-critical derivative/residual gaps (regen, gas volume, GG key, pipe dynamics on example 20).
 
-### Next (start Workstream 6.3)
-1. Add lint/format baseline (Ruff) and a lightweight performance benchmark suite.
-2. Refresh README contributor paths to reference verification docs.
-3. Reduce legacy path surface area called out in `docs/ARCHITECTURE.md`.
-4. Add the first parity example once a frozen reference CSV is chosen.
-
 ### Completed in Workstream 6.2
 1. Formalized the verification ladder and matrix documentation.
 2. Promoted example 21 into an automated subsystem verification suite with pytest gates.
 3. Added analytical reference-check harness and design-point tables.
 4. Fixed canonical-case `mdot.total` tracking and closed example 19 acceptance.
 5. Published the first FFSC canonical verification report.
+
+### Completed in Workstream 6.3
+1. Added Ruff lint/format baseline and `[dev]` optional dependencies.
+2. Added lightweight benchmarks (`scripts/run_benchmarks.py`) with solve counters.
+3. Cached source catalog / runtime maps and skipped redundant algebraic second passes.
+4. Clarified legacy surfaces in `docs/ARCHITECTURE.md` and marked orphaned `atha.examples`.
+5. Added `CONTRIBUTING.md` and refreshed README / architecture docs.
+
+### Next (start Workstream 6.4)
+1. Define a reference-data ingestion schema (provenance, units, channel mapping).
+2. Seed the first historical / literature comparison cases (pump map, valve step, startup trace).
+3. Wire a retained parity example once a frozen reference CSV is chosen.
+4. Extend reporting to emit external-correlation overlays automatically.

@@ -1,3 +1,10 @@
+"""Legacy nonlinear root helpers used by EngineLayout solvers.
+
+Prefer ``atha.network.problem.NetworkProblem`` solve methods on the
+canonical generic-port path. This module remains for
+``SteadyStateSolver`` / ``TransientSolver`` compatibility only.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
