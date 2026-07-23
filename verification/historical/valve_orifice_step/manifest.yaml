@@ -1,0 +1,17 @@
+id: valve_orifice_step
+title: Incompressible orifice valve step characterization
+source: Textbook orifice law mdot = CdA * sqrt(2*rho*dP)
+provenance: |
+  Synthetic valve calibration curve for fixed upstream/downstream pressure
+  and a rate-limited opening. Mirrors GFSSP/FullFlow-style orifice checks.
+category: analytical
+allowed_use: verification_only
+data_file: trace.csv
+time_alignment:
+  time_column: TIME
+channels:
+  - {reference_channel: VALVE_POSITION, atha_channel: VALVE_POSITION}
+  - {reference_channel: MDOT, atha_channel: MDOT, units: kg/s}
+notes:
+  - CdA_max=2e-4 m^2, rho=1140 kg/m3, dP=2e5 Pa.
+  - Used by analytical reference checks and historical correlation demos.

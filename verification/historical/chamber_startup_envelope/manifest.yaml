@@ -1,0 +1,22 @@
+id: chamber_startup_envelope
+title: Literature-style chamber/thrust startup envelope
+source: Reduced-order ignition delay + first-order rise toward design Pc/thrust
+provenance: |
+  Synthetic envelope representing published startup-shape expectations for
+  injector-chamber-nozzle chains (not a digitized proprietary hot-fire).
+  Steady targets align with examples/25 chamber_startup_transient design.
+category: literature_synthetic
+allowed_use: verification_only
+data_file: trace.csv
+time_alignment:
+  time_column: TIME
+  trim_start_s: 0.0
+  trim_end_s: 3.0
+channels:
+  - {reference_channel: PC, atha_channel: PC, units: Pa}
+  - {reference_channel: THRUST, atha_channel: THRUST, units: N}
+  - {reference_channel: MDOT_TOTAL, atha_channel: MDOT_TOTAL, units: kg/s}
+  - {reference_channel: C_STAR, atha_channel: C_STAR, units: m/s}
+notes:
+  - Use for rise-time / settling metric exercises against example 25 chamber startup.
+  - Tolerances should remain generous until chemistry-accurate DAE combustors land.

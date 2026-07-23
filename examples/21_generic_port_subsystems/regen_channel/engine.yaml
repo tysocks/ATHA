@@ -1,0 +1,29 @@
+name: regen_channel_mvp
+units: SI
+components:
+  coolant_supply:
+    type: BoundarySource
+    parameters: {P: 8.0e6, T: 120.0, rho: 420.0, gamma: 1.2, cp: 3500.0, h: 4.2e5}
+  coolant_sink:
+    type: BoundarySink
+    parameters: {P: 7.5e6, h: 5.0e5}
+  regen:
+    type: RegenChannel
+    parameters:
+      wall_mass: 12.0
+      wall_cp: 500.0
+      hot_area: 0.18
+      cool_area: 0.22
+      h_hot_design: 4.5e4
+      h_cool_design: 1.2e4
+      Pc_design: 5.0e6
+      recovery_factor: 0.90
+      gas_T: 3400.0
+      gas_P: 5.0e6
+      coolant_T_in: 120.0
+      coolant_cp: 3500.0
+      mdot_design: 2.5
+      initial_T_wall: 500.0
+connections:
+  - {from: coolant_supply.outlet, to: regen.coolant_inlet, domain: fluid}
+  - {from: regen.coolant_outlet, to: coolant_sink.inlet, domain: fluid}

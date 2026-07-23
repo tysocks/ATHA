@@ -16,7 +16,7 @@ class SolverDriverResult:
     summary: object
     analysis_type: str
     mode: str
-    execution_plan: "ExecutionPlan"
+    execution_plan: ExecutionPlan
 
 
 @dataclass(frozen=True)
@@ -42,6 +42,7 @@ class ExecutionPhase:
     start_s: float
     end_s: float
     name: str = ""
+    advance_when: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,7 +173,17 @@ def _execution_phases(
             end = float(phase.get("end_s", phase.get("end", t_end)))
             if end <= start:
                 raise ValueError(f"analysis.time.phases[{index}] end_s must be greater than start_s")
-            phases.append(ExecutionPhase(start_s=start, end_s=end, name=name))
+            advance_when = phase.get("advance_when")
+            if advance_when is not None and not isinstance(advance_when, dict):
+                raise ValueError(f"analysis.time.phases[{index}].advance_when must be a mapping")
+            phases.append(
+                ExecutionPhase(
+                    start_s=start,
+                    end_s=end,
+                    name=name,
+                    advance_when=dict(advance_when) if isinstance(advance_when, dict) else None,
+                )
+            )
         return phases
     breakpoints = collect_config_breakpoints(
         loaded.boundary_conditions,

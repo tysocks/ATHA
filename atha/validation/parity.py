@@ -207,9 +207,14 @@ def parity_channel_specs_from_config(raw: object) -> list[ParityChannelSpec]:
             raise ValueError(f"parity channel {index} must be a mapping")
         try:
             name = str(item["name"])
-            reference = str(item.get("reference_channel", item["channel"]))
         except KeyError as exc:
             raise ValueError(f"parity channel {index} missing required key {exc.args[0]!r}") from exc
+        if "reference_channel" in item:
+            reference = str(item["reference_channel"])
+        elif "channel" in item:
+            reference = str(item["channel"])
+        else:
+            raise ValueError(f"parity channel {index} missing required key 'reference_channel'")
         windows = item.get("windows", ())
         if isinstance(windows, str):
             window_names = (windows,)

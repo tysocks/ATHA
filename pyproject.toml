@@ -18,8 +18,53 @@ dependencies = [
     "h5py>=3.10",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
 [project.scripts]
 atha-run = "atha.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["atha*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: full-engine mission-cycle verification gates",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["atha", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line length handled separately; many physics lines are long
+    "B008",  # function calls in defaults used intentionally in a few places
+    "B905",  # zip(strict=...) not required across existing physics helpers
+    "UP035", # gradual typing.collections.abc migration
+]
+
+[tool.ruff.lint.per-file-ignores]
+"atha/solver/**" = ["F401"]
+"atha/jannaf/**" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

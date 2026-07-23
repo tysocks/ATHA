@@ -1,0 +1,4 @@
+name: chamber_startup_transient_operating
+targets:
+  mdot_total: {value: 10.0}
+  OF: {value: 3.2}

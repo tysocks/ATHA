@@ -8,9 +8,18 @@ from atha.config.controllers import (
     controller_evaluation_period,
     controller_input_paths,
     controller_output_paths,
+    controller_reset_state_values,
     controller_state_infos,
     evaluate_controllers,
     evaluate_dynamic_controllers,
+)
+from atha.config.mission_phases import (
+    PhaseTransition,
+    controller_hold_when_inactive,
+    controller_is_active,
+    controller_should_reset_on_enter,
+    detect_phase_transition,
+    resolve_phase_name,
 )
 from atha.config.maps import build_performance_map, build_performance_maps
 from atha.config.perturbations import apply_path_overrides, flatten_overrides
@@ -52,6 +61,7 @@ __all__ = [
     "MapConfig",
     "OperatingConditionsConfig",
     "PhaseConfig",
+    "PhaseTransition",
     "TelemetryConfig",
     "TimingConfig",
     "TransientConfig",
@@ -69,9 +79,14 @@ __all__ = [
     "apply_path_overrides",
     "controller_execution_order",
     "controller_evaluation_period",
+    "controller_hold_when_inactive",
     "controller_input_paths",
+    "controller_is_active",
     "controller_output_paths",
+    "controller_reset_state_values",
+    "controller_should_reset_on_enter",
     "controller_state_infos",
+    "detect_phase_transition",
     "evaluate_boundary_conditions",
     "evaluate_controllers",
     "evaluate_dynamic_controllers",
@@ -79,4 +94,5 @@ __all__ = [
     "evaluate_schedule",
     "evaluate_timing_events",
     "flatten_overrides",
+    "resolve_phase_name",
 ]

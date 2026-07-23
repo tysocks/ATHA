@@ -1,0 +1,13 @@
+name: regen_channel_telemetry
+sample_rate_hz: 5
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: T_WALL, source: regen.T_wall, units: K}
+  - {alias: Q_HOT, source: regen.Q_hot, units: W}
+  - {alias: Q_COOL, source: regen.Q_cool, units: W}
+  - {alias: Q_DOT, source: regen.Q_dot, units: W}
+  - {alias: MDOT, source: regen.coolant_inlet.mdot, units: kg/s}
+exports: {csv: true, plot: true}
+plots:
+  - {title: Wall Temperature, x: TIME, y: [T_WALL], ylabel: K}
+  - {title: Heat Loads, x: TIME, y: [Q_HOT, Q_COOL, Q_DOT], ylabel: W}

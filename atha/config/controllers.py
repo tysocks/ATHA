@@ -212,14 +212,22 @@ def controller_state_infos(config) -> list[ControllerStateInfo]:
 
 
 def controller_is_active(controller: Mapping[str, Any], current_phase: str | None) -> bool:
-    active_phases = controller.get("active_phases")
-    if active_phases is None:
-        return True
-    if isinstance(active_phases, str):
-        active = {active_phases}
-    else:
-        active = {str(phase) for phase in active_phases}
-    return current_phase in active
+    from atha.config.mission_phases import controller_is_active as _phase_active
+
+    return _phase_active(controller, current_phase)
+
+
+def controller_reset_state_values(controller_name: str, controller: Mapping[str, Any]) -> dict[str, float]:
+    """Return default memory values used when resetting a controller on phase entry."""
+
+    params = controller.get("parameters", {})
+    values: dict[str, float] = {}
+    controller_type = str(controller.get("type", "null"))
+    if controller_type in STATEFUL_CONTROLLER_TYPES:
+        values[f"controller.{controller_name}.integral"] = float(params.get("integral_initial", 0.0))
+    if controller_type == "rate_limiter":
+        values[f"controller.{controller_name}.previous_command"] = float(params.get("initial", 0.0))
+    return values
 
 
 def controller_execution_order(controllers: Mapping[str, Mapping[str, Any]]) -> list[str]:
@@ -285,7 +293,13 @@ def _lookup_signal(
     if path.startswith("timings."):
         return timings[path[len("timings."):]]
     if path.startswith("measurements."):
-        return measurements[path[len("measurements."):]]
+        key = path[len("measurements.") :]
+        if key in measurements:
+            return measurements[key]
+        dotted = key.replace("_", ".")
+        if dotted in measurements:
+            return measurements[dotted]
+        raise ValueError(f"Unknown controller signal: {path}")
     if path in commands:
         return commands[path]
     if path in targets:

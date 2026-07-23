@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -9,12 +9,16 @@ import numpy as np
 
 from atha.analysis.linearization import PerturbationConfig, finite_difference_state_space, write_linearization_json
 from atha.output.processor import OutputProcessor
+from atha.output.provenance import build_run_provenance, config_hash, git_commit
 from atha.output.sampling import telemetry_times
 from atha.output.telemetry import validate_telemetry_sources
-from atha.output.provenance import RUN_PROVENANCE_SCHEMA, build_run_provenance, config_hash, git_commit
 from atha.runner.context import AnalysisContext
 from atha.runner.dae_execution import DAEExecutionProblem, DAEExecutionResult, DAEPoint
-from atha.validation.acceptance import AcceptanceCheck, build_generic_port_acceptance_report, write_acceptance_report_json
+from atha.validation.acceptance import (
+    AcceptanceCheck,
+    build_generic_port_acceptance_report,
+    write_acceptance_report_json,
+)
 from atha.validation.regression import (
     build_regression_report_from_file,
     regression_windows_from_config,
@@ -44,6 +48,8 @@ class GenericDAESummary:
     residual_names: list[str] | None = None
     integration_segments: list[dict[str, Any]] | None = None
     solver_source: str = "generic_port"
+    algebraic_solve_count: int | None = None
+    algebraic_solve_skip_count: int | None = None
 
 
 def run_generic_steady(context: AnalysisContext) -> GenericDAESummary:
@@ -67,7 +73,13 @@ def run_generic_steady(context: AnalysisContext) -> GenericDAESummary:
         state_names=problem.state_names,
         algebraic_names=problem.algebraic_names,
         residual_names=problem.network_problem.residual_names,
-        integration_segments=[{"start_s": context.execution_plan.time_start_s, "end_s": context.execution_plan.time_start_s, "reason": "steady"}],
+        integration_segments=[
+            {
+                "start_s": context.execution_plan.time_start_s,
+                "end_s": context.execution_plan.time_start_s,
+                "reason": "steady",
+            }
+        ],
         solver_source=problem.solver_source,
     )
 
@@ -82,8 +94,7 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
     sample_times = _sample_times(context)
     result = problem.integrate(sample_times)
     integration_segments = [
-        {"start_s": segment.start_s, "end_s": segment.end_s, "reason": segment.reason}
-        for segment in result.segments
+        {"start_s": segment.start_s, "end_s": segment.end_s, "reason": segment.reason} for segment in result.segments
     ]
     output = _run_output(context.loaded.analysis_config.analysis, "profile.csv")
     residuals_json = context.output_dir / str(output.get("diagnostics", "profile_diagnostics.json"))
@@ -120,7 +131,9 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
             },
         ).write(
             _samples_from_result(result),
-            residuals={name: float(values[-1]) for name, values in result.residual_history.items()} if result.residual_history else None,
+            residuals={name: float(values[-1]) for name, values in result.residual_history.items()}
+            if result.residual_history
+            else None,
             state_history={name: result.X[:, i] for i, name in enumerate(result.state_names)},
             algebraic_history={name: result.Z[:, i] for i, name in enumerate(result.algebraic_names)},
             residual_history=result.residual_history,
@@ -147,6 +160,8 @@ def run_generic_profile(context: AnalysisContext) -> GenericDAESummary:
         residual_names=result.residual_names,
         integration_segments=integration_segments,
         solver_source=problem.solver_source,
+        algebraic_solve_count=problem.algebraic_solve_count,
+        algebraic_solve_skip_count=problem.algebraic_solve_skip_count,
     )
 
 
@@ -159,7 +174,9 @@ def run_generic_linearization(context: AnalysisContext) -> GenericDAESummary:
     x0 = problem.initial_state()
     u0 = np.zeros(0, dtype=float)
     t0 = context.execution_plan.time_start_s
-    linearization_cfg = context.analysis.get("linearization", {}) if isinstance(context.analysis.get("linearization", {}), dict) else {}
+    linearization_cfg = (
+        context.analysis.get("linearization", {}) if isinstance(context.analysis.get("linearization", {}), dict) else {}
+    )
     output_labels = _linearization_outputs(linearization_cfg, problem, t0, x0)
 
     def dynamics(x: np.ndarray, _u: np.ndarray) -> np.ndarray:
@@ -200,7 +217,9 @@ def run_generic_linearization(context: AnalysisContext) -> GenericDAESummary:
 def _sample_times(context: AnalysisContext) -> np.ndarray | None:
     if context.loaded.telemetry is None:
         return None
-    return telemetry_times(context.loaded.telemetry, context.execution_plan.time_start_s, context.execution_plan.time_end_s)
+    return telemetry_times(
+        context.loaded.telemetry, context.execution_plan.time_start_s, context.execution_plan.time_end_s
+    )
 
 
 def _run_output(analysis: Mapping[str, Any], default_csv: str) -> dict[str, Any]:
@@ -311,12 +330,20 @@ def _run_provenance(
     acceptance_passed: bool | None = None,
 ) -> dict[str, Any]:
     integration = context.execution_plan.integration
-    segments = [
-        {"start_s": float(segment.start_s), "end_s": float(segment.end_s), "reason": segment.reason}
-        for segment in result.segments
-    ] if result is not None else [
-        {"start_s": float(context.execution_plan.time_start_s), "end_s": float(context.execution_plan.time_start_s), "reason": "steady"}
-    ]
+    segments = (
+        [
+            {"start_s": float(segment.start_s), "end_s": float(segment.end_s), "reason": segment.reason}
+            for segment in result.segments
+        ]
+        if result is not None
+        else [
+            {
+                "start_s": float(context.execution_plan.time_start_s),
+                "end_s": float(context.execution_plan.time_start_s),
+                "reason": "steady",
+            }
+        ]
+    )
     payload = build_run_provenance(
         config_path=context.config_path,
         analysis_name=context.loaded.analysis_config.name,
@@ -409,15 +436,33 @@ def _write_acceptance_if_configured(
         return None, None
     values = _acceptance_values(result)
     residuals = {name: float(series[-1]) for name, series in result.residual_history.items() if series.size}
-    shaft_paths = tuple(str(path) for path in cfg.get("shaft_paths", []) if isinstance(path, str)) if isinstance(cfg.get("shaft_paths", []), list) else ()
+    shaft_paths = (
+        tuple(str(path) for path in cfg.get("shaft_paths", []) if isinstance(path, str))
+        if isinstance(cfg.get("shaft_paths", []), list)
+        else ()
+    )
+    tolerances: dict[str, float] = {}
+    raw_tolerances = cfg.get("tolerances", {})
+    if isinstance(raw_tolerances, Mapping):
+        tolerances = {str(key): float(value) for key, value in raw_tolerances.items() if _is_number(value)}
+    design = context.analysis.get("design", {})
+    if (
+        isinstance(design, Mapping)
+        and "thrust" in design
+        and "design_thrust" not in tolerances
+        and _is_number(design["thrust"])
+    ):
+        tolerances["design_thrust"] = float(design["thrust"])
     report = build_generic_port_acceptance_report(
         case=str(cfg.get("case", context.loaded.analysis_config.name)),
         time=result.time,
         values=values,
         residuals=residuals,
-        tolerances=cfg.get("tolerances", {}) if isinstance(cfg.get("tolerances", {}), Mapping) else {},
+        tolerances=tolerances,
         shaft_paths=shaft_paths,
-        required_paths=tuple(str(path) for path in cfg.get("required_paths", []) if isinstance(path, str)) if isinstance(cfg.get("required_paths", []), list) else (),
+        required_paths=tuple(str(path) for path in cfg.get("required_paths", []) if isinstance(path, str))
+        if isinstance(cfg.get("required_paths", []), list)
+        else (),
         evaluation_end_s=float(cfg["evaluation_end_s"]) if cfg.get("evaluation_end_s") is not None else None,
     )
     metadata = dict(report.metadata)
@@ -485,14 +530,18 @@ def _acceptance_values(result: DAEExecutionResult) -> dict[str, np.ndarray]:
     for point in result.points:
         timing_keys.update(key for key, value in point.timings.items() if _is_number(value))
     for key in sorted(timing_keys):
-        values.setdefault(key, np.asarray([float(point.timings.get(key, np.nan)) for point in result.points], dtype=float))
+        values.setdefault(
+            key, np.asarray([float(point.timings.get(key, np.nan)) for point in result.points], dtype=float)
+        )
     values.update(result.target_history)
     values.update({f"target.{key}": series for key, series in result.target_history.items()})
     values.update({f"targets.{key}": series for key, series in result.target_history.items()})
     return values
 
 
-def _linearization_outputs(cfg: Mapping[str, Any], problem: DAEExecutionProblem, t0: float, x0: np.ndarray) -> list[str]:
+def _linearization_outputs(
+    cfg: Mapping[str, Any], problem: DAEExecutionProblem, t0: float, x0: np.ndarray
+) -> list[str]:
     outputs = cfg.get("outputs")
     if isinstance(outputs, list) and outputs:
         return [str(item) for item in outputs]
@@ -509,8 +558,12 @@ def _perturbation_config(raw: object) -> PerturbationConfig:
         state_default=float(raw.get("state_default", 1.0e-6)),
         input_default=float(raw.get("input_default", 1.0e-6)),
         minimum_absolute=float(raw.get("minimum_absolute", 1.0e-9)),
-        per_state={str(k): float(v) for k, v in raw.get("per_state", {}).items()} if isinstance(raw.get("per_state", {}), Mapping) else None,
-        per_input={str(k): float(v) for k, v in raw.get("per_input", {}).items()} if isinstance(raw.get("per_input", {}), Mapping) else None,
+        per_state={str(k): float(v) for k, v in raw.get("per_state", {}).items()}
+        if isinstance(raw.get("per_state", {}), Mapping)
+        else None,
+        per_input={str(k): float(v) for k, v in raw.get("per_input", {}).items()}
+        if isinstance(raw.get("per_input", {}), Mapping)
+        else None,
     )
 
 

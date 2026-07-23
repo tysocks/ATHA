@@ -34,15 +34,28 @@ analysis:
   time:
     start_s: 0.0
     end_s: 30.0
+    # Canonical ATHA mission-cycle phase set for Workstream 6.1.
     phases:
-      - name: startup
+      - name: prestart
         start_s: 0.0
+        end_s: 1.0
+      - name: startup
+        start_s: 1.0
         end_s: 3.0
       - name: CLC
         start_s: 3.0
+        end_s: 10.0
+      - name: throttle
+        start_s: 10.0
+        end_s: 20.0
+      - name: CLC_recover
+        start_s: 20.0
         end_s: 25.0
       - name: shutdown
         start_s: 25.0
+        end_s: 28.0
+      - name: rundown
+        start_s: 28.0
         end_s: 30.0
   fluids:
     oxidizer: Oxygen
@@ -78,7 +91,7 @@ analysis:
       state_default: 1.0e-6
       input_default: 1.0e-5
   acceptance:
-    description: Generic DAE profile execution of the FFSC full-port transient case.
+    description: Canonical FFSC full mission-cycle generic-port DAE profile case.
     report: ffsc_dae_acceptance.acceptance.json
     case: ffsc_dae_acceptance_generic_profile
     require_solver_source: generic_port
@@ -98,6 +111,9 @@ analysis:
       final_of_abs: 3.0
       mdot_tracking_rms_rel: 0.35
       of_tracking_rms_abs: 1.75
+      min_peak_thrust: 1.0e5
+      min_powered_tail_thrust: 1.0e5
+      powered_tail_s: 10.0
       min_shaft_speed_delta_rpm: 100.0
       max_normalized_residual: 1.0e6
     expected_behavior:
@@ -107,3 +123,5 @@ analysis:
       - turbine torque changes lox_shaft.omega and methane_shaft.omega.
       - pump pressure rise changes through affinity-law map behavior.
       - chamber flow and thrust settle near 150 kN at the 40 kg/s target.
+      - sustained powered-tail thrust remains above min_powered_tail_thrust (strict gate).
+      - controllers are inactive in prestart/startup/shutdown/rundown and active in CLC/throttle/CLC_recover.

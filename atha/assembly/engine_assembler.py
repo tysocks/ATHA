@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any
 
 from atha.components.registry import component_residual_contract, component_spec
+from atha.components.residuals import ResidualEvaluationContext
 from atha.config import build_performance_maps, evaluate_boundary_conditions
 from atha.config.balances import balance_configs, wrap_problem_with_balances
-from atha.config.loader import LoadedAnalysisConfig
 from atha.config.controllers import controller_state_infos
+from atha.config.loader import LoadedAnalysisConfig
 from atha.config.schema import ComponentConfig
 from atha.config.transients import TransientSystem
 from atha.network import NetworkProblem
 from atha.network.ports import PortNetworkBuilder
-from atha.components.residuals import ResidualEvaluationContext
 
 
 @dataclass
@@ -30,7 +31,7 @@ class SourceCatalog:
         for path in paths:
             self.add(path)
 
-    def with_sources(self, paths: Iterable[str]) -> "SourceCatalog":
+    def with_sources(self, paths: Iterable[str]) -> SourceCatalog:
         catalog = SourceCatalog(set(self.sources))
         catalog.update(paths)
         return catalog
@@ -50,8 +51,11 @@ class EngineAssembler:
     def __init__(self, loaded: LoadedAnalysisConfig) -> None:
         self.loaded = loaded
         self._runtime_maps = build_performance_maps(loaded.maps) if loaded.maps else {}
+        self._source_catalog: SourceCatalog | None = None
 
     def source_catalog(self) -> SourceCatalog:
+        if self._source_catalog is not None:
+            return self._source_catalog
         catalog = SourceCatalog()
         catalog.add("time", "mdot.total")
         self._add_boundary_sources(catalog)
@@ -62,7 +66,14 @@ class EngineAssembler:
         self._add_component_sources(catalog)
         self._add_connection_sources(catalog)
         self._add_port_network_sources(catalog)
+        self._source_catalog = catalog
         return catalog
+
+    @property
+    def runtime_maps(self) -> dict[str, Any]:
+        """Cached performance maps built once per assembled config."""
+
+        return self._runtime_maps
 
     def telemetry_sources(self, extra_sources: Iterable[str] = ()) -> set[str]:
         return self.source_catalog().with_sources(extra_sources).sources

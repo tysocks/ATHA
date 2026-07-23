@@ -1,0 +1,17 @@
+name: chamber_startup_transient_telemetry
+sample_rate_hz: 20
+channels:
+  - {alias: TIME, source: time, units: s}
+  - {alias: TARGET_MDOT_TOTAL, source: target.mdot_total, units: kg/s}
+  - {alias: MDOT_TOTAL, source: mdot.total, units: kg/s}
+  - {alias: OF, source: chamber.OF}
+  - {alias: PC, source: chamber.P, units: Pa}
+  - {alias: TC, source: chamber.T, units: K}
+  - {alias: NOZZLE_MDOT, source: nozzle.mdot, units: kg/s}
+  - {alias: C_STAR, source: nozzle.c_star, units: m/s}
+  - {alias: THRUST, source: nozzle.thrust, units: N}
+exports: {csv: true, plot: true}
+plots:
+  - {title: Chamber pressure, x: TIME, y: [PC], ylabel: Pressure}
+  - {title: Thrust, x: TIME, y: [THRUST], ylabel: Thrust}
+  - {title: Mass flow, x: TIME, y: [MDOT_TOTAL, NOZZLE_MDOT], ylabel: kg/s}

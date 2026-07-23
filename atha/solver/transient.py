@@ -1,3 +1,9 @@
+"""Legacy EngineLayout transient solver.
+
+The canonical production path is ``atha.runner.dae_execution.DAEExecutionProblem``
+with YAML phases, controllers, and residual/derivative contracts.
+"""
+
 from __future__ import annotations
 import numpy as np
 from scipy.integrate import solve_ivp

@@ -17,10 +17,22 @@ from atha.config import (
     evaluate_operating_targets,
     evaluate_timing_events,
 )
-from atha.config.schedules import collect_config_breakpoints
-from atha.config.controllers import controller_state_infos
-from atha.config.controllers import controller_evaluation_period, controller_is_active, controller_sample_index
+from atha.config.controllers import (
+    controller_evaluation_period,
+    controller_is_active,
+    controller_reset_state_values,
+    controller_sample_index,
+    controller_state_infos,
+)
 from atha.config.loader import LoadedAnalysisConfig
+from atha.config.mission_phases import (
+    controller_hold_when_inactive,
+    controller_should_reset_on_enter,
+    detect_phase_transition,
+    resolve_phase_name_with_guards,
+    update_forced_phase_ends,
+)
+from atha.config.schedules import collect_config_breakpoints
 from atha.network import NetworkProblem, NetworkSolution, WarmStart
 from atha.network.preconditioner import precondition_algebraic_guess
 from atha.runner.progress import SolverProgressEvent
@@ -55,7 +67,7 @@ class DAEExecutionResult:
     boundary_history: dict[str, np.ndarray]
     measurement_history: dict[str, np.ndarray]
     points: list[DAEPoint] = field(default_factory=list)
-    segments: list["IntegrationSegment"] = field(default_factory=list)
+    segments: list[IntegrationSegment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -81,12 +93,14 @@ class DAESolvePolicy:
 class DAEExecutionProblem:
     """Universal DAE execution-loop foundation.
 
-    This class owns the common `X/Z/Rz` bookkeeping that compatibility runners
-    previously duplicated or skipped. It evaluates schedules, controllers,
-    transient blocks, state modes, and the port algebraic network through one
-    path. Physical derivatives are still supplied by component models in later
-    phases; today, transient and controller-state derivatives are integrated and
-    other states default to zero unless a caller supplies a derivative hook.
+    This class owns the common `X/Z/Rz` bookkeeping for the production ATHA
+    path. It evaluates schedules, mission phases, controllers, transient blocks,
+    state modes, and the port algebraic network through one path.
+
+    Plant derivatives are supplied by registered component derivative contracts
+    (Pipe, combustors/GG/preburner, Rotor, RegenChannel, GasVolume). Transient
+    actuator states and controller memory are also integrated. Components without
+    a derivative contract remain algebraically closed (or static) by design.
     """
 
     def __init__(
@@ -104,6 +118,9 @@ class DAEExecutionProblem:
         self.progress_callback = progress_callback
         self._last_progress_percent = -1.0e9
         self.solver_source = "generic_port"
+        self._runtime_maps = self.assembler.runtime_maps
+        self.algebraic_solve_count = 0
+        self.algebraic_solve_skip_count = 0
         self.network_problem = network_problem or self.assembler.port_network_problem(
             require_square=not self.solve_policy.allow_non_square
         )
@@ -129,6 +146,9 @@ class DAEExecutionProblem:
         }
         self._controller_period_s = controller_evaluation_period(loaded.controllers)
         self._controller_hold_cache: dict[int, dict[str, Any]] = {}
+        self._inactive_command_hold: dict[str, float] = {}
+        self._previous_phase: str | None = None
+        self._forced_phase_ends: dict[str, float] = {}
         self._shaft_couplings = _shaft_couplings(loaded.engine.components, loaded.engine.connections)
         self.balances = balance_configs(loaded.analysis_config.analysis.get("balances", {}))
         self._initial_trimmed = False
@@ -155,16 +175,25 @@ class DAEExecutionProblem:
         boundaries = evaluate_boundary_conditions(self.loaded.boundary_conditions, t) if self.loaded.boundary_conditions is not None else {}
         timings = evaluate_timing_events(self.loaded.timings, t)
         transient_state = self._transient_state_vector(x)
-        commands = self._evaluate_controllers(t, targets, timings, {}, states)
-        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+        open_loop_commands = self._evaluate_controllers(t, targets, timings, {}, states)
+        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **open_loop_commands})
+        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, open_loop_commands, transient_sources)
         solution = self._solve_network(t, warm_start, network_inputs)
         measurements = self._measurements(solution.values, states)
         commands = self._evaluate_controllers(t, targets, timings, measurements, states)
-        transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
-        network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
-        solution = self._solve_network(t, warm_start, network_inputs)
-        measurements = self._measurements(solution.values, states)
+        if _command_maps_equal(open_loop_commands, commands):
+            self.algebraic_solve_skip_count += 1
+        else:
+            transient_sources = self.transient_system.sample_sources(t, transient_state, {**timings, **commands})
+            network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
+            solution = self._solve_network(t, warm_start, network_inputs)
+            measurements = self._measurements(solution.values, states)
+        self._forced_phase_ends = update_forced_phase_ends(
+            self.execution_plan.phases,
+            float(t),
+            measurements,
+            self._forced_phase_ends,
+        )
         return DAEPoint(
             time=float(t),
             states=states,
@@ -179,6 +208,8 @@ class DAEExecutionProblem:
         )
 
     def rhs(self, t: float, x: np.ndarray, warm_start: WarmStart | None = None) -> np.ndarray:
+        # Apply phase-entry controller memory resets only on the integration path.
+        self._apply_phase_entry_resets_to_state(t, x)
         point = self.evaluate(t, x, warm_start)
         name, value = _largest_abs(point.normalized_residuals)
         self._emit_progress(
@@ -204,6 +235,8 @@ class DAEExecutionProblem:
         return dx
 
     def integrate(self, sample_times: np.ndarray | None = None) -> DAEExecutionResult:
+        self._forced_phase_ends.clear()
+        self._previous_phase = None
         if not self._initial_trimmed:
             self.trim_initial_conditions()
         self._emit_progress("setup", self.execution_plan.time_start_s, "building sample schedule", force=True)
@@ -473,20 +506,25 @@ class DAEExecutionProblem:
     ) -> dict[str, Any]:
         if self.loaded.controllers is None:
             return {}
+        current_phase = self._current_phase(t)
         sample_index = controller_sample_index(t, self._controller_period_s)
         if measurements and sample_index is not None and sample_index in self._controller_hold_cache:
-            return dict(self._controller_hold_cache[sample_index])
+            self._previous_phase = current_phase
+            return self._controller_hold_cache[sample_index]
         if not measurements and sample_index is not None:
             if sample_index in self._controller_hold_cache:
-                return dict(self._controller_hold_cache[sample_index])
+                self._previous_phase = current_phase
+                return self._controller_hold_cache[sample_index]
             previous = self._controller_hold_cache.get(sample_index - 1)
             if previous is not None:
-                return dict(previous)
+                self._previous_phase = current_phase
+                return previous
         outputs: dict[str, Any] = {}
-        current_phase = self._current_phase(t)
         for name in controller_execution_order(self.loaded.controllers.controllers):
             controller = self.loaded.controllers.controllers[name]
             if not controller_is_active(controller, current_phase):
+                if controller_hold_when_inactive(controller):
+                    outputs.update(self._inactive_controller_hold(name, controller))
                 continue
             ctype = str(controller.get("type", "null"))
             if ctype in {"proportional", "pi", "pid"}:
@@ -508,9 +546,57 @@ class DAEExecutionProblem:
                         previous_outputs=self._controller_hold_cache.get((sample_index or 0) - 1, {}) if sample_index is not None else {},
                     )
                 )
+            self._capture_inactive_hold(name, controller, outputs)
         if measurements and sample_index is not None:
             self._controller_hold_cache[sample_index] = dict(outputs)
+        self._previous_phase = current_phase
         return outputs
+
+    def _apply_phase_entry_resets_to_state(self, t: float, x: np.ndarray) -> None:
+        if self.loaded.controllers is None:
+            return
+        current_phase = self._current_phase(t)
+        transition = detect_phase_transition(self._previous_phase, current_phase, t)
+        if transition is None or not transition.entered or current_phase is None:
+            return
+        reset_applied = False
+        for name, controller in self.loaded.controllers.controllers.items():
+            if not controller_should_reset_on_enter(controller, current_phase):
+                continue
+            for state_name, value in controller_reset_state_values(name, controller).items():
+                index = self._controller_state_indexes.get(state_name)
+                if index is not None:
+                    x[index] = value
+                    self.X0[index] = value
+                    reset_applied = True
+        if reset_applied:
+            self._controller_hold_cache.clear()
+
+    def _capture_inactive_hold(self, name: str, controller: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
+        output = controller.get("output")
+        if isinstance(output, str) and output in outputs and isinstance(outputs[output], (int, float, np.floating)):
+            self._inactive_command_hold[output] = float(outputs[output])
+        output_map = controller.get("outputs")
+        if isinstance(output_map, Mapping):
+            for path in output_map.values():
+                key = str(path)
+                if key in outputs and isinstance(outputs[key], (int, float, np.floating)):
+                    self._inactive_command_hold[key] = float(outputs[key])
+
+    def _inactive_controller_hold(self, name: str, controller: Mapping[str, Any]) -> dict[str, float]:
+        held: dict[str, float] = {}
+        output = controller.get("output")
+        if isinstance(output, str) and output in self._inactive_command_hold:
+            held[output] = self._inactive_command_hold[output]
+            held[f"controller.{name}.command"] = held[output]
+            held[f"controller.{name}.held"] = 1.0
+        output_map = controller.get("outputs")
+        if isinstance(output_map, Mapping):
+            for path in output_map.values():
+                key = str(path)
+                if key in self._inactive_command_hold:
+                    held[key] = self._inactive_command_hold[key]
+        return held
 
     def _feedback_controller(
         self,
@@ -690,15 +776,12 @@ class DAEExecutionProblem:
         return corrected_x, corrected_z, point
 
     def _current_phase(self, t: float) -> str | None:
-        for phase in self.execution_plan.phases:
-            name = getattr(phase, "name", "")
-            if not name:
-                continue
-            start = float(getattr(phase, "start_s"))
-            end = float(getattr(phase, "end_s"))
-            if start <= float(t) < end or (float(t) == end and end == self.execution_plan.time_end_s):
-                return str(name)
-        return None
+        return resolve_phase_name_with_guards(
+            self.execution_plan.phases,
+            t,
+            time_end_s=self.execution_plan.time_end_s,
+            forced_end_times=self._forced_phase_ends,
+        )
 
     def _apply_state_modes(self, dx: np.ndarray, x: np.ndarray) -> None:
         for name, mode in self.execution_plan.state_modes.items():
@@ -752,9 +835,9 @@ class DAEExecutionProblem:
 
     def _measurements(self, algebraics: Mapping[str, float], states: Mapping[str, float]) -> dict[str, float]:
         measurements = {**algebraics, **states}
-        mdot_total = float(algebraics.get("mdot.total", algebraics.get("nozzle.mdot", 0.0)))
-        measurements.setdefault("mdot_total", mdot_total)
-        measurements.setdefault("mdot.total", mdot_total)
+        mdot_total = _aggregate_total_mdot(algebraics, self.loaded.engine.components)
+        measurements["mdot_total"] = mdot_total
+        measurements["mdot.total"] = mdot_total
         if "chamber.OF" in algebraics:
             measurements.setdefault("OF", float(algebraics["chamber.OF"]))
         for name, component in self.loaded.engine.components.items():
@@ -834,6 +917,7 @@ class DAEExecutionProblem:
         warm_start: WarmStart | np.ndarray | None,
         network_inputs: Mapping[str, Any],
     ):
+        self.algebraic_solve_count += 1
         warm_start = self._precondition_warm_start(t, warm_start, network_inputs)
         if self.solve_policy.algebraic_solver in {"preconditioned_direct", "direct", "explicit"}:
             return self._direct_network_solution(t, warm_start, network_inputs)
@@ -1017,6 +1101,7 @@ class DAEExecutionProblem:
             t,
             np.asarray(z, dtype=float),
             {"inputs": network_inputs},
+            maps=self._runtime_maps,
         )
 
 
@@ -1225,6 +1310,77 @@ def _first_numeric(values: Mapping[str, float], paths: tuple[str, ...], default:
         if path in values and _is_number(values[path]):
             return float(values[path])
     return float(default)
+
+
+def _aggregate_total_mdot(
+    algebraics: Mapping[str, float],
+    components: Mapping[str, Any],
+) -> float:
+    """Resolve total propellant mass flow for controllers and telemetry.
+
+    Priority:
+    1. Explicit algebraic trim variable ``mdot.total``.
+    2. Sum of pump inlet flows (primary path for turbopump-fed engines).
+    3. Sum of combustor / preburner / GG inlet flows.
+    4. Component ``*.mdot`` totals.
+    5. Nozzle throat flow as a last resort.
+    """
+
+    if "mdot.total" in algebraics:
+        return float(algebraics["mdot.total"])
+
+    pump_total = 0.0
+    pump_count = 0
+    for name, component in components.items():
+        if getattr(component, "type", "") != "Pump":
+            continue
+        mdot = _first_numeric(
+            algebraics,
+            (f"{name}.inlet.mdot", f"{name}.mdot"),
+            float("nan"),
+        )
+        if np.isfinite(mdot):
+            pump_total += abs(mdot)
+            pump_count += 1
+    if pump_count > 0:
+        return pump_total
+
+    combustor_total = 0.0
+    combustor_ports = 0
+    for name, component in components.items():
+        if getattr(component, "type", "") not in {"CombustionChamber", "Preburner", "GasGenerator"}:
+            continue
+        component_mdot = algebraics.get(f"{name}.mdot")
+        if component_mdot is not None:
+            return abs(float(component_mdot))
+        for port in ("fuel_inlet", "ox_inlet", "lox_inlet", "inlet"):
+            path = f"{name}.{port}.mdot"
+            if path in algebraics:
+                combustor_total += abs(float(algebraics[path]))
+                combustor_ports += 1
+    if combustor_ports > 0:
+        return combustor_total
+
+    return float(algebraics.get("nozzle.mdot", 0.0))
+
+
+def _command_maps_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Return True when controller command maps are numerically equal."""
+
+    if left is right:
+        return True
+    if len(left) != len(right):
+        return False
+    for key, value in left.items():
+        if key not in right:
+            return False
+        other = right[key]
+        if _is_number(value) and _is_number(other):
+            if abs(float(value) - float(other)) > 1.0e-12 * max(abs(float(value)), abs(float(other)), 1.0):
+                return False
+        elif value != other:
+            return False
+    return True
 
 
 def _is_number(value: Any) -> bool:

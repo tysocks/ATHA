@@ -1,0 +1,5 @@
+parameter,value,units,notes
+cda,0.0002,m2,
+rho,1140,kg/m3,LOx-like density
+delta_p,200000,Pa,
+expected_mdot,4.795,m2,sqrt(2*rho*dP)*CdA with CdA=2e-4

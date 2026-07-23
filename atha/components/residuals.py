@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
+import numpy as np
+
 from atha.config.schema import ComponentConfig
 from atha.network.problem import NetworkResidual, NetworkVariable
 
@@ -429,11 +431,21 @@ class FiniteVolumeCombustorContract:
         gas_r = float(component.parameters.get("gas_R", component.parameters.get("R", 355.0)))
         gamma_target = float(component.parameters.get("gamma", component.parameters.get("gas_gamma", 1.22)))
         h_target = float(component.parameters.get("h_out", cp * temperature_target))
-        rho_target = pressure_target / max(gas_r * temperature_target, 1.0e-12)
+        volume = float(component.parameters.get("volume", 0.0))
+        # When volume > 0, chamber/preburner/GG pressure is state-owned by the
+        # finite-volume ODE. Do not algebraically pin P to an inlet/design
+        # anchor — that fights mass-storage dynamics and collapses thrust.
+        pressure = context.value(f"{name}.P", pressure_target)
+        if volume > 0.0:
+            pressure_residual = 0.0
+            rho_target = pressure / max(gas_r * temperature_target, 1.0e-12)
+        else:
+            pressure_residual = pressure - pressure_target
+            rho_target = pressure_target / max(gas_r * temperature_target, 1.0e-12)
         return {
             f"{name}.mass_balance_residual": context.value(f"{name}.mdot") - total_in,
             f"{name}.OF_residual": context.value(f"{name}.OF") - target_of,
-            f"{name}.pressure_residual": context.value(f"{name}.P") - pressure_target,
+            f"{name}.pressure_residual": pressure_residual,
             f"{name}.temperature_residual": context.value(f"{name}.T") - temperature_target,
             f"{name}.energy_residual": context.value(f"{name}.h") - h_target,
             f"{name}.density_residual": context.value(f"{name}.rho") - rho_target,
@@ -442,28 +454,106 @@ class FiniteVolumeCombustorContract:
 
 
 class RegenThermalContract:
-    """Minimal thermal residual contract for cooling/regen paths."""
+    """Thermal residual contract for regenerative cooling channels.
+
+    Closes net heat load and exposes reconstructed ``Q_hot`` / ``Q_cool``
+    targets so the DAE wall-temperature derivative can integrate without
+    relying on the legacy OOP RegenChannel path.
+    """
 
     def variables(self, component: ComponentConfig, model: Mapping[str, Any]) -> list[NetworkVariable]:
+        _ = model
+        t_wall0 = float(component.parameters.get("initial_T_wall", component.parameters.get("T_wall", 300.0)))
         return [
-            NetworkVariable(f"{component.name}.T_wall", units="K", scale=1000.0, owner=component.name),
+            NetworkVariable(f"{component.name}.T_wall", units="K", scale=1000.0, initial=t_wall0, owner=component.name),
             NetworkVariable(f"{component.name}.Q_dot", units="W", scale=1.0e5, owner=component.name),
+            NetworkVariable(f"{component.name}.Q_hot", units="W", scale=1.0e5, owner=component.name),
+            NetworkVariable(f"{component.name}.Q_cool", units="W", scale=1.0e5, owner=component.name),
         ]
 
     def residuals(self, component: ComponentConfig, model: Mapping[str, Any]) -> list[NetworkResidual]:
+        _ = model
         return [
             NetworkResidual(f"{component.name}.heat_balance_residual", units="W", scale=1.0e5, owner=component.name),
             NetworkResidual(f"{component.name}.wall_temperature_residual", units="K", scale=1000.0, owner=component.name),
+            NetworkResidual(f"{component.name}.Q_hot_residual", units="W", scale=1.0e5, owner=component.name),
+            NetworkResidual(f"{component.name}.Q_cool_residual", units="W", scale=1.0e5, owner=component.name),
         ]
 
     def evaluate(self, component: ComponentConfig, context: ResidualEvaluationContext) -> dict[str, float]:
         name = component.name
-        q_hot = context.value(f"{name}.Q_hot", float(component.parameters.get("Q_hot", 0.0)))
-        q_cool = context.value(f"{name}.Q_cool", float(component.parameters.get("Q_cool", 0.0)))
-        target_t_wall = float(component.parameters.get("initial_T_wall", component.parameters.get("T_wall", 300.0)))
+        t_wall = context.value(f"{name}.T_wall", float(component.parameters.get("initial_T_wall", component.parameters.get("T_wall", 300.0))))
+        q_hot_target, q_cool_target, t_wall_eq = _regen_heat_targets(component, context, t_wall)
         return {
-            f"{name}.heat_balance_residual": context.value(f"{name}.Q_dot") - (q_hot - q_cool),
-            f"{name}.wall_temperature_residual": context.value(f"{name}.T_wall") - target_t_wall,
+            f"{name}.heat_balance_residual": context.value(f"{name}.Q_dot") - (q_hot_target - q_cool_target),
+            f"{name}.wall_temperature_residual": context.value(f"{name}.T_wall") - t_wall_eq,
+            f"{name}.Q_hot_residual": context.value(f"{name}.Q_hot") - q_hot_target,
+            f"{name}.Q_cool_residual": context.value(f"{name}.Q_cool") - q_cool_target,
+            f"{name}.Q_hot_target": q_hot_target,
+            f"{name}.Q_cool_target": q_cool_target,
+            f"{name}.T_wall_target": t_wall_eq,
+        }
+
+
+class GasVolumeContract:
+    """Ideal-gas volume algebraic anchors for pressure, temperature, and density."""
+
+    def variables(self, component: ComponentConfig, model: Mapping[str, Any]) -> list[NetworkVariable]:
+        _ = model
+        pressure = float(component.parameters.get("initial_P", 101325.0))
+        temperature = float(component.parameters.get("gas_T", component.parameters.get("initial_T", 300.0)))
+        gas_r = float(component.parameters.get("gas_R", component.parameters.get("R", 287.0)))
+        gamma = float(component.parameters.get("gamma", component.parameters.get("gas_gamma", 1.4)))
+        cp = float(component.parameters.get("cp", component.parameters.get("gas_cp", gas_r * gamma / max(gamma - 1.0, 1.0e-6))))
+        return [
+            NetworkVariable(f"{component.name}.P", units="Pa", scale=max(pressure, 1.0e5), initial=pressure, owner=component.name),
+            NetworkVariable(f"{component.name}.T", units="K", scale=max(temperature, 100.0), initial=temperature, owner=component.name),
+            NetworkVariable(f"{component.name}.h", units="J/kg", scale=1.0e6, initial=float(component.parameters.get("initial_h", cp * temperature)), owner=component.name),
+            NetworkVariable(f"{component.name}.rho", units="kg/m^3", scale=100.0, initial=pressure / max(gas_r * temperature, 1.0e-12), owner=component.name),
+            NetworkVariable(f"{component.name}.gamma", scale=1.0, initial=gamma, owner=component.name),
+            NetworkVariable(f"{component.name}.mdot", units="kg/s", scale=1.0, initial=0.0, owner=component.name),
+        ]
+
+    def residuals(self, component: ComponentConfig, model: Mapping[str, Any]) -> list[NetworkResidual]:
+        _ = model
+        return [
+            NetworkResidual(f"{component.name}.pressure_residual", units="Pa", scale=1.0e5, owner=component.name),
+            NetworkResidual(f"{component.name}.temperature_residual", units="K", scale=100.0, owner=component.name),
+            NetworkResidual(f"{component.name}.energy_residual", units="J/kg", scale=1.0e6, owner=component.name),
+            NetworkResidual(f"{component.name}.density_residual", units="kg/m^3", scale=100.0, owner=component.name),
+            NetworkResidual(f"{component.name}.gamma_residual", scale=1.0, owner=component.name),
+            NetworkResidual(f"{component.name}.mass_balance_residual", units="kg/s", scale=1.0, owner=component.name),
+        ]
+
+    def evaluate(self, component: ComponentConfig, context: ResidualEvaluationContext) -> dict[str, float]:
+        name = component.name
+        gas_r = float(component.parameters.get("gas_R", component.parameters.get("R", 287.0)))
+        gamma = float(component.parameters.get("gamma", component.parameters.get("gas_gamma", 1.4)))
+        temperature = float(component.parameters.get("gas_T", component.parameters.get("initial_T", 300.0)))
+        pressure_target = _first_context_value(
+            context,
+            (f"{name}.inlet.P", f"{name}.outlet.P", f"{name}.P"),
+            float(component.parameters.get("initial_P", 101325.0)),
+        )
+        cp = float(component.parameters.get("cp", component.parameters.get("gas_cp", gas_r * gamma / max(gamma - 1.0, 1.0e-6))))
+        h_target = float(component.parameters.get("initial_h", cp * temperature))
+        mdot_in = _port_sum(context, name, ("inlet", "inlet_a", "inlet_b"))
+        mdot_out = _port_sum(context, name, ("outlet", "outlet_a", "outlet_b"))
+        volume = float(component.parameters.get("volume", 0.0))
+        pressure = context.value(f"{name}.P", pressure_target)
+        if volume > 0.0:
+            pressure_residual = 0.0
+            rho_target = pressure / max(gas_r * temperature, 1.0e-12)
+        else:
+            pressure_residual = pressure - pressure_target
+            rho_target = pressure_target / max(gas_r * temperature, 1.0e-12)
+        return {
+            f"{name}.pressure_residual": pressure_residual,
+            f"{name}.temperature_residual": context.value(f"{name}.T") - temperature,
+            f"{name}.energy_residual": context.value(f"{name}.h") - h_target,
+            f"{name}.density_residual": context.value(f"{name}.rho") - rho_target,
+            f"{name}.gamma_residual": context.value(f"{name}.gamma") - gamma,
+            f"{name}.mass_balance_residual": context.value(f"{name}.mdot") - 0.5 * (mdot_in + mdot_out),
         }
 
 
@@ -688,11 +778,14 @@ def residual_contract_for_type(type_name: str) -> ComponentResidualContract | No
         "FlowSplitter": FlowSplitterContract(),
         "CombustionChamber": FiniteVolumeCombustorContract(),
         "Preburner": FiniteVolumeCombustorContract(),
+        "GasGenerator": FiniteVolumeCombustorContract(),
         "Nozzle": NozzleConductanceContract(),
         "Pump": PumpHeadContract(),
         "Turbine": TurbinePowerContract(),
         "Rotor": RotorTorqueBalanceContract(),
         "RegenChannel": RegenThermalContract(),
+        "GasVolume": GasVolumeContract(),
+        "Volume": GasVolumeContract(),
         "OrificeCompressible": ValveFlowContract(),
     }.get(type_name)
 
@@ -818,6 +911,52 @@ def _compressible_orifice_mdot(
         return common * choked_coeff, 1.0
     term = ratio ** (2.0 / gamma) - ratio ** ((gamma + 1.0) / gamma)
     return common * (2.0 / (gamma - 1.0) * max(term, 0.0)) ** 0.5, 0.0
+
+
+def _regen_heat_targets(
+    component: ComponentConfig,
+    context: ResidualEvaluationContext,
+    t_wall: float,
+) -> tuple[float, float, float]:
+    """Return ``(Q_hot, Q_cool, T_wall_eq)`` for a regenerative channel."""
+
+    name = component.name
+    t_gas = context.value(f"{name}.gas.T", float(component.parameters.get("gas_T", 3500.0)))
+    p_gas = context.value(f"{name}.gas.P", float(component.parameters.get("Pc_design", component.parameters.get("gas_P", 1.0e7))))
+    recovery = float(component.parameters.get("recovery_factor", 0.90))
+    h_hot_design = float(component.parameters.get("h_hot_design", 5.0e4))
+    pc_design = max(float(component.parameters.get("Pc_design", 1.0e7)), 1.0)
+    a_hot = float(component.parameters.get("hot_area", component.parameters.get("A_hot", 0.0)))
+    a_cool = float(component.parameters.get("cool_area", component.parameters.get("A_cool", 0.0)))
+    h_hot = h_hot_design * (max(p_gas, 1.0) / pc_design) ** 0.8
+    t_aw = recovery * t_gas
+    q_hot = h_hot * a_hot * (t_aw - t_wall)
+
+    mdot = abs(
+        context.value(
+            f"{name}.coolant_inlet.mdot",
+            context.value(f"{name}.coolant_outlet.mdot", float(component.parameters.get("mdot_design", 1.0))),
+        )
+    )
+    t_cool_in = context.value(
+        f"{name}.coolant_inlet.T",
+        context.value(f"{name}.T_bulk_in", float(component.parameters.get("coolant_T_in", 150.0))),
+    )
+    cp_cool = float(component.parameters.get("coolant_cp", 3500.0))
+    h_cool = float(component.parameters.get("h_cool_design", 1.0e4))
+    ntu = h_cool * a_cool / max(mdot * max(cp_cool, 1.0), 1.0e-12)
+    effectiveness = 1.0 - float(np.exp(-max(ntu, 0.0)))
+    g_cool = effectiveness * mdot * max(cp_cool, 1.0)
+    q_cool = g_cool * (t_wall - t_cool_in)
+    g_hot = h_hot * a_hot
+    g_ref = max(g_hot + g_cool, 1.0)
+    t_wall_eq = (g_hot * t_aw + g_cool * t_cool_in) / g_ref
+    # If geometry is unspecified, fall back to an explicit wall-temperature anchor.
+    if a_hot <= 0.0 and a_cool <= 0.0:
+        t_wall_eq = float(component.parameters.get("initial_T_wall", component.parameters.get("T_wall", t_wall)))
+        q_hot = float(component.parameters.get("Q_hot", 0.0))
+        q_cool = float(component.parameters.get("Q_cool", 0.0))
+    return float(q_hot), float(q_cool), float(t_wall_eq)
 
 
 def _port_sum(context: ResidualEvaluationContext, component: str, ports: tuple[str, ...]) -> float:
