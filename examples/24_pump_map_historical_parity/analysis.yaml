@@ -1,0 +1,61 @@
+name: pump_map_historical_parity
+# Thin parity wrapper around example 23. Engine/maps are loaded only to satisfy
+# the analysis schema; the candidate run uses the referenced config folder.
+engine: ../23_single_lox_pump_map/configs/engine.yaml
+maps:
+  lox_pump_map: ../23_single_lox_pump_map/configs/maps/lox_pump_map.yaml
+boundary_conditions: ../23_single_lox_pump_map/configs/boundaries.yaml
+operating_conditions: ../23_single_lox_pump_map/configs/operating_conditions.yaml
+controllers: ../23_single_lox_pump_map/configs/controller.yaml
+transients: ../23_single_lox_pump_map/configs/transients.yaml
+timings: ../23_single_lox_pump_map/configs/timings.yaml
+telemetry: ../23_single_lox_pump_map/configs/telemetry.yaml
+analysis:
+  type: parity
+  time:
+    start_s: 0.0
+    end_s: 10.0
+    phases:
+      - name: startup
+        start_s: 0.0
+        end_s: 2.0
+      - name: tracking
+        start_s: 2.0
+        end_s: 9.0
+      - name: shutdown
+        start_s: 9.0
+        end_s: 10.0
+  parity:
+    case: pump_map_vs_affinity_oracle
+    reference_csv: ../../verification/historical/pump_map_affinity_ramp/trace.csv
+    candidate: ../23_single_lox_pump_map/configs
+    candidate_output_dir: candidate
+    report: pump_map_historical_parity.parity.json
+    delta_csv: pump_map_historical_parity.parity_delta.csv
+    time_column: TIME
+    windows:
+      - {name: tracking, start_s: 2.0, end_s: 8.5}
+    channels:
+      - name: mdot
+        reference_channel: MDOT
+        candidate_channel: MDOT
+        category: plant
+        rms_rtol: 0.75
+        final_rtol: 0.50
+        atol: 1.0
+      - name: pump_dp
+        reference_channel: PUMP_DP
+        candidate_channel: PUMP_DP
+        category: plant
+        rms_rtol: 0.75
+        final_rtol: 0.50
+        atol: 2.0
+      - name: pump_rpm
+        reference_channel: PUMP_RPM
+        candidate_channel: PUMP_RPM
+        category: plant
+        rms_rtol: 0.60
+        final_rtol: 0.40
+        atol: 10000.0
+        rms_atol: 10000.0
+        final_atol: 10000.0

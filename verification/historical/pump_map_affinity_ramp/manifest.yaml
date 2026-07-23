@@ -1,0 +1,24 @@
+id: pump_map_affinity_ramp
+title: LOx pump affinity-law ramp reference
+source: ATHA reduced-order affinity oracle + example 23 map point
+provenance: |
+  Synthetic literature-style pump transient constructed from affinity laws
+  (Q ~ N, H ~ N^2) with a first-order lag and the example-23 map efficiency
+  at phi=0.00439. Not proprietary hot-fire data.
+category: literature_synthetic
+allowed_use: verification_only
+data_file: trace.csv
+time_alignment:
+  time_column: TIME
+  time_unit: s
+  time_offset_s: 0.0
+channels:
+  - {reference_channel: MDOT, atha_channel: MDOT, units: kg/s, description: Valve inlet / delivered mass flow}
+  - {reference_channel: PUMP_DP, atha_channel: PUMP_DP, units: MPa, description: Pump pressure rise}
+  - {reference_channel: PUMP_RPM, atha_channel: PUMP_RPM, units: rpm}
+  - {reference_channel: PUMP_PHI, atha_channel: PUMP_PHI}
+  - {reference_channel: PUMP_PSI, atha_channel: PUMP_PSI}
+  - {reference_channel: PUMP_EFFICIENCY, atha_channel: PUMP_EFFICIENCY}
+notes:
+  - Intended for subsystem correlation against examples/23_single_lox_pump_map.
+  - Affinity targets assume incompressible liquid and map coefficients near design.

@@ -28,28 +28,47 @@ class ParityAnalysisSummary:
 
 
 def run_parity_analysis(context: AnalysisContext) -> ParityAnalysisSummary:
-    """Run a reference and candidate analysis, then compare telemetry parity."""
+    """Run a reference and candidate analysis, then compare telemetry parity.
+
+    The reference side may be either:
+    - another ATHA config folder (`parity.reference` / `reference_config`), or
+    - an external / historical CSV (`parity.reference_csv`) for Workstream 6.4.
+    """
 
     cfg = context.analysis.get("parity", context.analysis)
     if not isinstance(cfg, Mapping):
         raise ValueError("parity analysis requires analysis.parity mapping")
-    reference_cfg = _resolve_path(context.config_path, cfg.get("reference", cfg.get("reference_config")))
+    reference_csv_cfg = cfg.get("reference_csv")
     candidate_cfg = _resolve_path(context.config_path, cfg.get("candidate", cfg.get("candidate_config")))
-    if reference_cfg is None or candidate_cfg is None:
-        raise ValueError("parity analysis requires reference and candidate config paths")
+    if candidate_cfg is None:
+        raise ValueError("parity analysis requires candidate config path")
 
     from atha.runner.config_runner import run_config_folder
 
-    reference_output = context.output_dir / str(cfg.get("reference_output_dir", "reference"))
     candidate_output = context.output_dir / str(cfg.get("candidate_output_dir", "candidate"))
-    reference_output.mkdir(parents=True, exist_ok=True)
     candidate_output.mkdir(parents=True, exist_ok=True)
-    reference = run_config_folder(reference_cfg, output_dir=reference_output)
     candidate = run_config_folder(candidate_cfg, output_dir=candidate_output)
-    if reference.csv is None:
-        raise ValueError(f"reference run did not produce CSV: {reference_cfg}")
     if candidate.csv is None:
         raise ValueError(f"candidate run did not produce CSV: {candidate_cfg}")
+
+    if reference_csv_cfg is not None:
+        reference_csv = _resolve_path(context.config_path, reference_csv_cfg)
+        if reference_csv is None or not reference_csv.exists():
+            raise ValueError(f"parity.reference_csv not found: {reference_csv_cfg}")
+        reference_cfg = reference_csv
+        reference_csv_path = reference_csv
+        reference_analysis_type = "external_csv"
+    else:
+        reference_cfg = _resolve_path(context.config_path, cfg.get("reference", cfg.get("reference_config")))
+        if reference_cfg is None:
+            raise ValueError("parity analysis requires reference config path or reference_csv")
+        reference_output = context.output_dir / str(cfg.get("reference_output_dir", "reference"))
+        reference_output.mkdir(parents=True, exist_ok=True)
+        reference = run_config_folder(reference_cfg, output_dir=reference_output)
+        if reference.csv is None:
+            raise ValueError(f"reference run did not produce CSV: {reference_cfg}")
+        reference_csv_path = reference.csv
+        reference_analysis_type = reference.analysis_type
 
     channels = parity_channel_specs_from_config(cfg.get("channels"))
     if not channels:
@@ -57,7 +76,7 @@ def run_parity_analysis(context: AnalysisContext) -> ParityAnalysisSummary:
     windows = phase_windows_from_config(cfg.get("windows")) or _windows_from_execution_plan(context)
     case = str(cfg.get("case", context.loaded.analysis_config.name))
     report = build_parity_report_from_files(
-        reference.csv,
+        reference_csv_path,
         candidate.csv,
         case=case,
         channels=channels,
@@ -66,14 +85,15 @@ def run_parity_analysis(context: AnalysisContext) -> ParityAnalysisSummary:
         metadata={
             "reference_config": str(reference_cfg),
             "candidate_config": str(candidate_cfg),
-            "reference_analysis_type": reference.analysis_type,
+            "reference_analysis_type": reference_analysis_type,
             "candidate_analysis_type": candidate.analysis_type,
+            "reference_source": "external_csv" if reference_csv_cfg is not None else "atha_config",
         },
     )
     report_path = write_parity_report_json(context.output_dir / str(cfg.get("report", "parity_report.json")), report)
     delta_path = write_parity_delta_csv(
         context.output_dir / str(cfg.get("delta_csv", "parity_delta.csv")),
-        reference.csv,
+        reference_csv_path,
         candidate.csv,
         channels=channels,
         windows=windows,
@@ -84,7 +104,7 @@ def run_parity_analysis(context: AnalysisContext) -> ParityAnalysisSummary:
         solver_status="completed parity analysis",
         reference_config=reference_cfg,
         candidate_config=candidate_cfg,
-        reference_csv=reference.csv,
+        reference_csv=reference_csv_path,
         candidate_csv=candidate.csv,
         parity_report=report_path,
         parity_delta_csv=delta_path,

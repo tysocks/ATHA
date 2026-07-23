@@ -25,8 +25,9 @@ major component and retained example to its gate, oracle, and current status.
 | Chamber / preburner / GG | `injector_chamber_nozzle`, `preburner_turbine` | P/T/OF balance stubs | acceptance + pytest | **Pass** |
 | Nozzle | `chamber_nozzle` | Thrust = 3500×mdot balance law + c* target | acceptance + reference + pytest | **Pass** |
 | Regen channel | `regen_channel` | Wall heating sign, Q_hot > Q_cool | acceptance + reference + pytest | **Pass** |
-| Full FFSC engine | `19_ffsc_dae_acceptance` | Mission schedule + controller phases (`docs/CANONICAL_MISSION_CASE.md`) | acceptance + pytest (`slow`) | **In progress** (mdot tracking fix landed in 6.2) |
+| Full FFSC engine | `19_ffsc_dae_acceptance` | Mission schedule + controller phases (`docs/CANONICAL_MISSION_CASE.md`) | acceptance + pytest (`slow`) | **Pass** (mdot tracking fixed in 6.2) |
 | GG single-shaft | `20_gg_single_shaft_methalox` | Mission profile + regression windows | acceptance/regression | **Pass** (existing gates) |
+| Pump historical parity | `24_pump_map_historical_parity` | Affinity-law literature oracle CSV | parity + historical suite | **Pass** (seeded 6.4) |
 
 ## Subsystem suite (`examples/21_generic_port_subsystems/`)
 

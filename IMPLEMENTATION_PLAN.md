@@ -900,6 +900,38 @@ Refresh docs in this order:
 
 ## 6.4 Workstream 4: verify ATHA with historic testing data and other packages
 
+### 6.4 status (implementation pass)
+
+| Deliverable | Status | Location / notes |
+| --- | --- | --- |
+| Reference-data schema + ingestion loader | **Completed** | `atha/validation/reference_data.py`, `verification/historical/*/manifest.yaml` |
+| Physical correlation metrics | **Completed** | `atha/validation/historical_correlation.py` |
+| Seeded pump / valve / startup datasets | **Completed** | `verification/historical/{pump_map_affinity_ramp,valve_orifice_step,chamber_startup_envelope}` |
+| Historical correlation suite runner | **Completed** | `scripts/run_historical_correlation.py` |
+| Retained parity example with external CSV | **Completed** | `examples/24_pump_map_historical_parity` (`parity.reference_csv`) |
+| Workflow + suite reports | **Completed** | `docs/HISTORICAL_CORRELATION.md`, `docs/reports/HISTORICAL_CORRELATION_REPORT.md` |
+
+#### Code / package changes landed in this pass
+
+- Extended `run_parity_analysis` to accept `parity.reference_csv` (external oracle)
+- Dataset discovery / load helpers with time alignment and channel mapping
+- Correlation reports emit provenance, metric summaries, and optional parity overlays
+
+#### Deliverables not fully closed, with reasons
+
+1. **Proprietary hot-fire telemetry packages**  
+   No real engine-test recordings are in-repo. The schema and workflow are ready;
+   seeded references are analytical / literature-synthetic placeholders.
+
+2. **GFSSP / FullFlow / ROCETS exported traces**  
+   No third-party exports were available in this environment. Ingestion path is
+   documented for drop-in CSV/HDF5 packages under `verification/historical/`.
+
+3. **Tight startup-shape agreement on chamber_nozzle**  
+   Example 21 chamber_nozzle is a fast balance profile, not a physics-rich ignition
+   transient. Final Pc/thrust/c* gates are meaningful; rise-time matching remains loose
+   until combustor DAE fidelity improves.
+
 ### Objective
 
 Demonstrate that ATHA is not only internally consistent, but externally credible.
@@ -1051,8 +1083,15 @@ ATHA should be considered to have reached the intended near-term target when it 
 4. Clarified legacy surfaces in `docs/ARCHITECTURE.md` and marked orphaned `atha.examples`.
 5. Added `CONTRIBUTING.md` and refreshed README / architecture docs.
 
-### Next (start Workstream 6.4)
-1. Define a reference-data ingestion schema (provenance, units, channel mapping).
-2. Seed the first historical / literature comparison cases (pump map, valve step, startup trace).
-3. Wire a retained parity example once a frozen reference CSV is chosen.
-4. Extend reporting to emit external-correlation overlays automatically.
+### Completed in Workstream 6.4
+1. Defined reference-dataset manifests with provenance, units, and channel mapping.
+2. Seeded pump, valve, and chamber-startup historical/literature packages.
+3. Added physical correlation metrics and `scripts/run_historical_correlation.py`.
+4. Wired retained example 24 parity against an external affinity-law CSV.
+5. Documented the external-correlation workflow and suite report.
+
+### Next (post-roadmap hardening)
+1. Attach real hot-fire / GFSSP / FullFlow exports under `verification/historical/` when available.
+2. Tighten chamber ignition/startup physics so rise-time correlation becomes meaningful.
+3. Optional whole-repo Ruff format cleanup and CI gate.
+4. Optional deletion pass for unused legacy `atha.examples` / EngineLayout solvers.

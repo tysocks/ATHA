@@ -41,6 +41,24 @@ from atha.validation.reference_checks import (
     regen_wall_temperature_rise,
     write_reference_check_report_json,
 )
+from atha.validation.reference_data import (
+    ChannelMapping,
+    ReferenceDataset,
+    TimeAlignment,
+    discover_reference_datasets,
+    load_reference_dataset,
+)
+from atha.validation.historical_correlation import (
+    CorrelationReport,
+    PhysicalMetricCheck,
+    PhysicalMetricSpec,
+    build_correlation_report,
+    compute_overshoot,
+    compute_rise_time_s,
+    compute_settling_time_s,
+    correlate_candidate_csv_against_dataset,
+    write_correlation_report_json,
+)
 from atha.validation.verification_suite import (
     VERIFICATION_CASES,
     VerificationCaseResult,
@@ -95,4 +113,18 @@ __all__ = [
     "run_verification_suite",
     "verification_cases",
     "write_verification_suite_report",
+    "ChannelMapping",
+    "ReferenceDataset",
+    "TimeAlignment",
+    "discover_reference_datasets",
+    "load_reference_dataset",
+    "CorrelationReport",
+    "PhysicalMetricCheck",
+    "PhysicalMetricSpec",
+    "build_correlation_report",
+    "compute_overshoot",
+    "compute_rise_time_s",
+    "compute_settling_time_s",
+    "correlate_candidate_csv_against_dataset",
+    "write_correlation_report_json",
 ]

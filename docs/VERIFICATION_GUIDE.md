@@ -75,8 +75,27 @@ external solver export is unavailable.
 ## Parity mode (reference vs candidate)
 
 Parity analysis is registered as `analysis.type: parity` and uses
-`atha.validation.parity`. No retained example enables it yet; add a small case
-when a frozen reference CSV is available.
+`atha.validation.parity`.
+
+Two reference modes are supported:
+
+1. **ATHA vs ATHA** — `parity.reference` + `parity.candidate` config folders
+2. **External / historical CSV vs ATHA** — `parity.reference_csv` + `parity.candidate`
+
+Retained example:
+
+```bash
+python -m atha.cli examples/24_pump_map_historical_parity --progress
+```
+
+For richer physical metrics (rise time, settling, integrated error) and provenance
+packaging, use the historical correlation workflow:
+
+```bash
+python scripts/run_historical_correlation.py
+```
+
+See `docs/HISTORICAL_CORRELATION.md`.
 
 ## Adding a new verification case
 

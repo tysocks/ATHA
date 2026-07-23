@@ -92,6 +92,7 @@ JSON reports next to telemetry.
 | `examples/21_generic_port_subsystems` | Fast subsystem / MVP verification gates |
 | `examples/22_ethanol_lox_5kn_two_shaft_gg` | Two-shaft GG mission-profile template |
 | `examples/23_single_lox_pump_map` | Pump-map transient verification seed |
+| `examples/24_pump_map_historical_parity` | Historical/literature parity vs affinity oracle |
 
 ## Tests, lint, and benchmarks
 
@@ -106,6 +107,9 @@ JSON reports next to telemetry.
 
 # Runtime benchmarks (fast + medium by default)
 .venv/bin/python scripts/run_benchmarks.py
+
+# Historical / external correlation suite
+.venv/bin/python scripts/run_historical_correlation.py
 ```
 
 ## Documentation
@@ -118,4 +122,6 @@ JSON reports next to telemetry.
 - `docs/MISSING_PHYSICS_BACKLOG.md` — prioritized physics gaps
 - `docs/VERIFICATION_GUIDE.md` — how to run acceptance / verification
 - `docs/VERIFICATION_MATRIX.md` — component and case verification status
+- `docs/HISTORICAL_CORRELATION.md` — external/historical data ingestion and metrics
 - `docs/reports/FFSC_CANONICAL_VERIFICATION_REPORT.md` — Level-3 engine report
+- `docs/reports/HISTORICAL_CORRELATION_REPORT.md` — Workstream 6.4 correlation report
