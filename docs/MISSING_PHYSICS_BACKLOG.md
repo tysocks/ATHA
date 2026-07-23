@@ -32,7 +32,7 @@ implemented during this pass. Remaining items are tracked for later workstreams.
 | Simplified FV mass/energy closure | existing / improved | Sufficient for topology + mission control work |
 | Low-pressure ignition tables | open | Needed for higher-fidelity start correlation |
 | Cantera-backed DAE residual mode | open | OOP Cantera chamber is not the DAE path |
-| Choked-nozzle-consistent chamber pressure ODE | open | Current residual still pressure-tracks upstream/design anchors |
+| Choked-nozzle-consistent chamber pressure ODE | **partial in 6.5** | Volume-owned `pressure_residual` soft-out; FFSC sustained thrust still open |
 
 ## Priority 4 — regenerative cooling integration
 
@@ -51,7 +51,16 @@ implemented during this pass. Remaining items are tracked for later workstreams.
 | Controller reset on phase entry | **done in 6.1** | `reset_on_enter` |
 | Hold command when inactive | **done in 6.1** | `hold_when_inactive` |
 | Explicit actuator component separate from valve flow | open | Currently transient-block based |
-| Event-driven sequence / abort state machine | open | Timed phases only; no guard-based transitions |
+| Event-driven sequence / abort state machine | **done in 6.5 (MVP)** | `advance_when` guards + forced phase ends; full abort FSM still open |
+
+## Priority 6 — full-engine continuity / sustained thrust (Workstream 6.5)
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Sustained-thrust acceptance gates | **done in 6.5** | `min_powered_tail_thrust`, `final_thrust_tracking` |
+| Combustor volume-owned pressure residual | **done in 6.5** | Soft-out when `volume > 0` |
+| FFSC chamber inlet vs pump mdot continuity | open | Peak thrust can pass while powered-tail thrust collapses |
+| Preburner → turbine → chamber branch closure | open | Suspected algebraic unlink; tracked by strict tail gate on example 19 |
 
 ## Blockers that cannot be fully closed in 6.1 alone
 
@@ -70,10 +79,10 @@ Delivered instead: residual/derivative contracts + isolated regen MVP.
 **Problem:** Real start/shutdown logic often depends on thresholds
 (e.g. chamber pressure crossed, shaft speed ready), not only wall-clock phase windows.
 
-**Why not finished here:** ATHA phases are currently time windows. A full sequencer
-needs condition evaluation, transition guards, abort handling, and telemetry of
-sequence state. Delivered instead: formal phase-control semantics on the existing
-time-phase model.
+**Status after 6.5:** MVP guard-based early phase advance is implemented
+(`analysis.time.phases[].advance_when` → `update_forced_phase_ends` /
+`resolve_phase_name_with_guards`). Remaining open work: abort handling,
+multi-condition guards, and richer sequence-state telemetry.
 
 ### 3. Chemistry-accurate DAE combustors
 

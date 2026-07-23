@@ -27,6 +27,8 @@ landed.
 | `final_mdot_tracking` | Total propellant flow vs `targets.mdot_total` |
 | `tail_mdot_rms_tracking` | RMS tracking error over last 10 s of powered window |
 | `powered_thrust` | Peak thrust floor during mission |
+| `min_powered_tail_thrust` | Sustained thrust floor over powered tail (strict; currently exposes collapse) |
+| `final_thrust_tracking` | Final thrust vs `design.thrust` relative error |
 | `*_shaft.rpm_response` | Shaft dynamics under turbine torque changes |
 | `solver_source` | Guardrail: generic-port DAE path only |
 
@@ -38,14 +40,21 @@ to the design ~40 kg/s. Controllers therefore saturated with large apparent erro
 Fix: `DAEExecutionProblem._aggregate_total_mdot()` now prefers pump inlet sums for
 turbopump-fed engines before falling back to nozzle flow.
 
+## Workstream 6.5 follow-up
+
+- Acceptance now fails overall when powered-tail thrust collapses, even if peak thrust and
+  mdot tracking pass. Slow pytest continues to gate on mdot tracking specifically.
+- Combustor `pressure_residual` no longer pins state-owned chamber/preburner pressure to
+  inlet anchors when `volume > 0`.
+
 ## Remaining gaps (honest status)
 
 | Topic | Status |
 | --- | --- |
-| Powered thrust decay after t≈1 s | Open physics issue — thrust falls to ~2.4 kN while pumps show design mdot |
+| Powered thrust decay after t≈1 s | Open physics issue — exposed by `min_powered_tail_thrust` |
 | External ROCETS/GFSSP trace overlay | Not yet available — parity mode ready |
 | Regen in full-engine topology | Still isolated in `regen_channel` MVP |
-| Event-driven abort sequencing | Timed phases only |
+| Event-driven abort sequencing | MVP `advance_when` guards landed; abort FSM still open |
 
 ## How to regenerate
 

@@ -1,0 +1,20 @@
+name: chamber_startup_transient_transients
+transients:
+  ox_valve:
+    type: first_order
+    input: ox_valve.command
+    output: ox_valve.position
+    initial: 0.0
+    parameters:
+      time_constant: 0.12
+      lower_limit: 0.0
+      upper_limit: 1.0
+  fuel_valve:
+    type: first_order
+    input: fuel_valve.command
+    output: fuel_valve.position
+    initial: 0.0
+    parameters:
+      time_constant: 0.12
+      lower_limit: 0.0
+      upper_limit: 1.0

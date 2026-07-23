@@ -51,7 +51,6 @@ This is the only path that retained examples 19–23 are expected to use.
 | `atha/solver/` | Legacy `EngineLayout` solvers + algebraic aliases |
 | `atha/core/` | OOP `BaseComponent` / port objects (still used by OOP components) |
 | `atha/jannaf/` | OOP nozzle efficiency helpers (not the DAE residual path) |
-| `atha/examples/` | **Orphaned** legacy `EngineLayout` helpers — do not extend |
 
 ## Architecture diagram
 
@@ -90,7 +89,6 @@ flowchart TD
 | `atha.solver.steady_state.SteadyStateSolver` | Legacy | Operates on OOP `EngineLayout` |
 | `atha.solver.transient.TransientSolver` | Legacy | Operates on OOP `EngineLayout` |
 | `atha.solver.nonlinear` | Legacy helper | Used only by the EngineLayout solvers above |
-| `atha.examples.*` | Orphaned | No retained example imports this package |
 | OOP classes under `atha/components/*.py` | Dual-use | Useful physics reference; not all methods are wired into the DAE path |
 | `atha.jannaf.*` | Dual-use | OOP nozzle path only; DAE nozzles use residual contracts |
 | `MetalNode` | Unregistered | Not available in YAML registry yet |
@@ -104,7 +102,19 @@ Phases are declared in `analysis.time.phases`. Controllers may use:
 - `reset_on_enter`
 - `hold_when_inactive`
 
-Helpers live in `atha.config.mission_phases` and are consumed by `DAEExecutionProblem`.
+Optional event-driven early advance (Workstream 6.5):
+
+```yaml
+phases:
+  - name: ignition
+    start_s: 0.15
+    end_s: 1.5
+    advance_when: {path: chamber.P, op: ">=", value: 4.0e6}
+```
+
+When the guard fires, the phase ends early and the next phase start is pulled
+forward. Helpers live in `atha.config.mission_phases` and are consumed by
+`DAEExecutionProblem`.
 
 ## Runtime performance notes (Workstream 6.3)
 

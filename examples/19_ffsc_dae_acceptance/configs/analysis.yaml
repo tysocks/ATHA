@@ -111,6 +111,9 @@ analysis:
       final_of_abs: 3.0
       mdot_tracking_rms_rel: 0.35
       of_tracking_rms_abs: 1.75
+      min_peak_thrust: 1.0e5
+      min_powered_tail_thrust: 1.0e5
+      powered_tail_s: 10.0
       min_shaft_speed_delta_rpm: 100.0
       max_normalized_residual: 1.0e6
     expected_behavior:
@@ -120,4 +123,5 @@ analysis:
       - turbine torque changes lox_shaft.omega and methane_shaft.omega.
       - pump pressure rise changes through affinity-law map behavior.
       - chamber flow and thrust settle near 150 kN at the 40 kg/s target.
+      - sustained powered-tail thrust remains above min_powered_tail_thrust (strict gate).
       - controllers are inactive in prestart/startup/shutdown/rundown and active in CLC/throttle/CLC_recover.

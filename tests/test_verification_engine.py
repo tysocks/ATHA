@@ -23,3 +23,7 @@ def test_ffsc_canonical_mdot_tracking(tmp_path: Path) -> None:
     checks = {item["name"]: item for item in payload["checks"]}
     assert checks["final_mdot_tracking"]["passed"] is True
     assert checks["tail_mdot_rms_tracking"]["passed"] is True
+    # Sustained-thrust gate is intentional and currently expected to fail until
+    # chamber/preburner continuity is closed (docs/MISSING_PHYSICS_BACKLOG.md).
+    assert "min_powered_tail_thrust" in checks
+    assert "final_thrust_tracking" in checks

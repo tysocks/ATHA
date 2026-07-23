@@ -7,4 +7,4 @@ trace file. See `docs/HISTORICAL_CORRELATION.md`.
 | --- | --- | --- |
 | `pump_map_affinity_ramp` | literature_synthetic | Affinity-law pump ramp vs example 23 |
 | `valve_orifice_step` | analytical | Orifice mdot vs opening |
-| `chamber_startup_envelope` | literature_synthetic | Pc/thrust startup shape vs chamber_nozzle |
+| `chamber_startup_envelope` | literature_synthetic | Pc/thrust startup shape vs example 25 |

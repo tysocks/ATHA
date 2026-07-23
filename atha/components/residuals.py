@@ -431,11 +431,21 @@ class FiniteVolumeCombustorContract:
         gas_r = float(component.parameters.get("gas_R", component.parameters.get("R", 355.0)))
         gamma_target = float(component.parameters.get("gamma", component.parameters.get("gas_gamma", 1.22)))
         h_target = float(component.parameters.get("h_out", cp * temperature_target))
-        rho_target = pressure_target / max(gas_r * temperature_target, 1.0e-12)
+        volume = float(component.parameters.get("volume", 0.0))
+        # When volume > 0, chamber/preburner/GG pressure is state-owned by the
+        # finite-volume ODE. Do not algebraically pin P to an inlet/design
+        # anchor — that fights mass-storage dynamics and collapses thrust.
+        pressure = context.value(f"{name}.P", pressure_target)
+        if volume > 0.0:
+            pressure_residual = 0.0
+            rho_target = pressure / max(gas_r * temperature_target, 1.0e-12)
+        else:
+            pressure_residual = pressure - pressure_target
+            rho_target = pressure_target / max(gas_r * temperature_target, 1.0e-12)
         return {
             f"{name}.mass_balance_residual": context.value(f"{name}.mdot") - total_in,
             f"{name}.OF_residual": context.value(f"{name}.OF") - target_of,
-            f"{name}.pressure_residual": context.value(f"{name}.P") - pressure_target,
+            f"{name}.pressure_residual": pressure_residual,
             f"{name}.temperature_residual": context.value(f"{name}.T") - temperature_target,
             f"{name}.energy_residual": context.value(f"{name}.h") - h_target,
             f"{name}.density_residual": context.value(f"{name}.rho") - rho_target,
@@ -529,11 +539,19 @@ class GasVolumeContract:
         h_target = float(component.parameters.get("initial_h", cp * temperature))
         mdot_in = _port_sum(context, name, ("inlet", "inlet_a", "inlet_b"))
         mdot_out = _port_sum(context, name, ("outlet", "outlet_a", "outlet_b"))
+        volume = float(component.parameters.get("volume", 0.0))
+        pressure = context.value(f"{name}.P", pressure_target)
+        if volume > 0.0:
+            pressure_residual = 0.0
+            rho_target = pressure / max(gas_r * temperature, 1.0e-12)
+        else:
+            pressure_residual = pressure - pressure_target
+            rho_target = pressure_target / max(gas_r * temperature, 1.0e-12)
         return {
-            f"{name}.pressure_residual": context.value(f"{name}.P") - pressure_target,
+            f"{name}.pressure_residual": pressure_residual,
             f"{name}.temperature_residual": context.value(f"{name}.T") - temperature,
             f"{name}.energy_residual": context.value(f"{name}.h") - h_target,
-            f"{name}.density_residual": context.value(f"{name}.rho") - pressure_target / max(gas_r * temperature, 1.0e-12),
+            f"{name}.density_residual": context.value(f"{name}.rho") - rho_target,
             f"{name}.gamma_residual": context.value(f"{name}.gamma") - gamma,
             f"{name}.mass_balance_residual": context.value(f"{name}.mdot") - 0.5 * (mdot_in + mdot_out),
         }

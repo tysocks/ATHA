@@ -1,0 +1,73 @@
+name: chamber_startup_transient
+engine: engine.yaml
+boundary_conditions: boundaries.yaml
+operating_conditions: operating_conditions.yaml
+transients: transients.yaml
+timings: timings.yaml
+telemetry: telemetry.yaml
+solver:
+  transient:
+    method: fixed_rk4
+    rtol: 1.0e-7
+    atol: 1.0e-8
+    max_step: 0.02
+analysis:
+  type: profile
+  solve_policy:
+    checked: false
+    residual_tolerance: 1.0e-6
+    strict_sources: true
+    corrector: endpoint
+    corrector_iterations: 2
+    preconditioner: design
+    algebraic_solver: preconditioned_direct
+    max_nfev: 30
+  integration:
+    segment_at_controller_samples: false
+  time:
+    start_s: 0.0
+    end_s: 3.0
+    phases:
+      - name: prestart
+        start_s: 0.0
+        end_s: 0.15
+      - name: ignition
+        start_s: 0.15
+        end_s: 1.5
+        advance_when: {path: chamber.P, op: ">=", value: 4.0e6}
+      - name: powered
+        start_s: 1.5
+        end_s: 3.0
+  design:
+    thrust: 35000.0
+    chamber_pressure: 5.0e6
+    mdot_total: 10.0
+    OF: 3.2
+  initial_conditions:
+    chamber.P: 1.0e5
+    chamber.T: 3500.0
+    ox_valve.position: 0.0
+    fuel_valve.position: 0.0
+  output:
+    csv: chamber_startup_transient.csv
+    plot: chamber_startup_transient.png
+    diagnostics: chamber_startup_transient.diagnostics.json
+  acceptance:
+    report: chamber_startup_transient.acceptance.json
+    case: chamber_startup_transient
+    require_solver_source: generic_port
+    evaluation_end_s: 2.99
+    required_paths:
+      - mdot.total
+      - chamber.P
+      - chamber.OF
+      - nozzle.thrust
+      - nozzle.c_star
+    tolerances:
+      min_peak_thrust: 15000.0
+      min_powered_tail_thrust: 10000.0
+      powered_tail_s: 0.5
+      final_thrust_rel: 0.55
+      final_mdot_rel: 0.55
+      final_of_abs: 1.5
+      max_normalized_residual: 1.0e6

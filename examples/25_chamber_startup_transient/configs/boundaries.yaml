@@ -1,0 +1,6 @@
+name: chamber_startup_transient_boundaries
+time_unit: s
+conditions:
+  ox_supply.outlet.P: {value: 8.0e6, units: Pa}
+  fuel_supply.outlet.P: {value: 8.0e6, units: Pa}
+  ambient.inlet.P: {value: 101325.0, units: Pa}

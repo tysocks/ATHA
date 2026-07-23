@@ -61,7 +61,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "atha/solver/**" = ["F401"]
-"atha/examples/**" = ["F401"]
 "atha/jannaf/**" = ["E402"]
 
 [tool.ruff.format]

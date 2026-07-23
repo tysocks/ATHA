@@ -24,7 +24,8 @@ from atha.config.mission_phases import (
     controller_hold_when_inactive,
     controller_should_reset_on_enter,
     detect_phase_transition,
-    resolve_phase_name,
+    resolve_phase_name_with_guards,
+    update_forced_phase_ends,
 )
 from atha.config.loader import LoadedAnalysisConfig
 from atha.network import NetworkProblem, NetworkSolution, WarmStart
@@ -142,6 +143,7 @@ class DAEExecutionProblem:
         self._controller_hold_cache: dict[int, dict[str, Any]] = {}
         self._inactive_command_hold: dict[str, float] = {}
         self._previous_phase: str | None = None
+        self._forced_phase_ends: dict[str, float] = {}
         self._shaft_couplings = _shaft_couplings(loaded.engine.components, loaded.engine.connections)
         self.balances = balance_configs(loaded.analysis_config.analysis.get("balances", {}))
         self._initial_trimmed = False
@@ -181,6 +183,12 @@ class DAEExecutionProblem:
             network_inputs = self._network_inputs(t, states, targets, boundaries, timings, commands, transient_sources)
             solution = self._solve_network(t, warm_start, network_inputs)
             measurements = self._measurements(solution.values, states)
+        self._forced_phase_ends = update_forced_phase_ends(
+            self.execution_plan.phases,
+            float(t),
+            measurements,
+            self._forced_phase_ends,
+        )
         return DAEPoint(
             time=float(t),
             states=states,
@@ -222,6 +230,8 @@ class DAEExecutionProblem:
         return dx
 
     def integrate(self, sample_times: np.ndarray | None = None) -> DAEExecutionResult:
+        self._forced_phase_ends.clear()
+        self._previous_phase = None
         if not self._initial_trimmed:
             self.trim_initial_conditions()
         self._emit_progress("setup", self.execution_plan.time_start_s, "building sample schedule", force=True)
@@ -761,7 +771,12 @@ class DAEExecutionProblem:
         return corrected_x, corrected_z, point
 
     def _current_phase(self, t: float) -> str | None:
-        return resolve_phase_name(self.execution_plan.phases, t, self.execution_plan.time_end_s)
+        return resolve_phase_name_with_guards(
+            self.execution_plan.phases,
+            t,
+            time_end_s=self.execution_plan.time_end_s,
+            forced_end_times=self._forced_phase_ends,
+        )
 
     def _apply_state_modes(self, dx: np.ndarray, x: np.ndarray) -> None:
         for name, mode in self.execution_plan.state_modes.items():

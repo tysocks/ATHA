@@ -766,7 +766,7 @@ For every verification case, produce:
 
 | Deliverable | Status | Location / notes |
 | --- | --- | --- |
-| Architectural bloat reduction / clearer legacy marking | **Completed** | Expanded `docs/ARCHITECTURE.md` legacy table; marked `atha.examples`, `atha.solver.nonlinear` |
+| Architectural bloat reduction / clearer legacy marking | **Completed** | Expanded `docs/ARCHITECTURE.md` legacy table; deleted orphaned `atha.examples` in 6.5 |
 | Runtime performance improvements | **Completed** | Cached source catalog; reused runtime maps in preconditioner; skip second network solve when commands unchanged; controller cache returns by reference |
 | Lightweight benchmark suite | **Completed** | `atha/benchmarks/`, `scripts/run_benchmarks.py` (fast / medium / slow cases) |
 | Lint / format baseline (Ruff) | **Completed** | `[tool.ruff]` in `pyproject.toml`; optional `[dev]` extra |
@@ -927,10 +927,11 @@ Refresh docs in this order:
    No third-party exports were available in this environment. Ingestion path is
    documented for drop-in CSV/HDF5 packages under `verification/historical/`.
 
-3. **Tight startup-shape agreement on chamber_nozzle**  
-   Example 21 chamber_nozzle is a fast balance profile, not a physics-rich ignition
-   transient. Final Pc/thrust/c* gates are meaningful; rise-time matching remains loose
-   until combustor DAE fidelity improves.
+3. **Startup-shape agreement before example 25**  
+   Example 21 chamber_nozzle remains a fast balance profile. Workstream 6.5 added
+   `examples/25_chamber_startup_transient` with finite-volume chamber rise dynamics
+   so rise-time correlation is meaningful; tolerances stay moderately loose until
+   chemistry-accurate DAE combustors land.
 
 ### Objective
 
@@ -1090,8 +1091,14 @@ ATHA should be considered to have reached the intended near-term target when it 
 4. Wired retained example 24 parity against an external affinity-law CSV.
 5. Documented the external-correlation workflow and suite report.
 
-### Next (post-roadmap hardening)
+### Completed in Workstream 6.5 (post-roadmap hardening)
+1. Event-driven phase advances via YAML `advance_when` guards wired into `DAEExecutionProblem`.
+2. Acceptance hardening: `min_powered_tail_thrust` + `final_thrust_tracking` (uses `design.thrust`).
+3. Volume-owned combustor/GasVolume pressure residuals no longer pin `P` to inlet anchors.
+4. Real-component chamber startup case (`examples/25_chamber_startup_transient`) for envelope correlation.
+5. GitHub Actions CI (ruff + fast pytest) and deletion of orphaned `atha.examples`.
+
+### Next
 1. Attach real hot-fire / GFSSP / FullFlow exports under `verification/historical/` when available.
-2. Tighten chamber ignition/startup physics so rise-time correlation becomes meaningful.
-3. Optional whole-repo Ruff format cleanup and CI gate.
-4. Optional deletion pass for unused legacy `atha.examples` / EngineLayout solvers.
+2. Close remaining FFSC chamber/preburner mass-continuity / sustained-thrust physics.
+3. Optional whole-repo Ruff format cleanup beyond the CI gate.

@@ -20,7 +20,7 @@ Do **not** extend:
 - `atha.components.factory.build_component_from_config`
 - `atha.solver.steady_state.SteadyStateSolver`
 - `atha.solver.transient.TransientSolver`
-- `atha.examples` helpers for `EngineLayout`
+- Legacy `EngineLayout` solvers under `atha.solver`
 
 See `docs/ARCHITECTURE.md` for the full package map.
 
@@ -99,9 +99,13 @@ sizes.
 
 1. Create a config folder with `analysis.yaml`, telemetry, and an `acceptance` block.
 2. Register a `VerificationCaseSpec` in `atha/validation/verification_suite.py`.
-3. Optionally add a design-point oracle under `verification/references/`.
+3. Optionally add a design-point oracle under `verification/references/` or a historical
+   package under `verification/historical/` (see `docs/HISTORICAL_CORRELATION.md`).
 4. Extend `tests/test_verification_subsystems.py` or a focused module.
 5. Document the case in `docs/VERIFICATION_MATRIX.md`.
+
+For external CSV parity, prefer `analysis.type: parity` with `parity.reference_csv`
+(see `examples/24_pump_map_historical_parity`).
 
 ## Documentation map
 

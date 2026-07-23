@@ -4,7 +4,7 @@ source: Reduced-order ignition delay + first-order rise toward design Pc/thrust
 provenance: |
   Synthetic envelope representing published startup-shape expectations for
   injector-chamber-nozzle chains (not a digitized proprietary hot-fire).
-  Steady targets align with examples/21 chamber_nozzle balance design.
+  Steady targets align with examples/25 chamber_startup_transient design.
 category: literature_synthetic
 allowed_use: verification_only
 data_file: trace.csv
@@ -18,5 +18,5 @@ channels:
   - {reference_channel: MDOT_TOTAL, atha_channel: MDOT_TOTAL, units: kg/s}
   - {reference_channel: C_STAR, atha_channel: C_STAR, units: m/s}
 notes:
-  - Use for rise-time / settling metric exercises against chamber_nozzle.
+  - Use for rise-time / settling metric exercises against example 25 chamber startup.
   - Tolerances should remain generous until chemistry-accurate DAE combustors land.

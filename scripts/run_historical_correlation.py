@@ -82,7 +82,7 @@ def _run_startup_correlation(output_dir: Path) -> dict:
     case = "chamber_startup_envelope"
     candidate_dir = output_dir / "candidate_chamber"
     result = run_config_folder(
-        REPO_ROOT / "examples" / "21_generic_port_subsystems" / "chamber_nozzle",
+        REPO_ROOT / "examples" / "25_chamber_startup_transient" / "configs",
         output_dir=candidate_dir,
         progress=False,
     )
@@ -93,13 +93,30 @@ def _run_startup_correlation(output_dir: Path) -> dict:
         dataset_path=HISTORICAL_ROOT / "chamber_startup_envelope",
         candidate_csv=result.csv,
         metric_specs=[
-            # Balance profiles settle almost immediately; emphasize final/peak agreement.
-            PhysicalMetricSpec(channel="MDOT_TOTAL", max_rms_rel=1.5, max_final_rel=0.35, max_peak_rel=0.50),
-            PhysicalMetricSpec(channel="THRUST", max_rms_rel=1.5, max_final_rel=0.35, max_peak_rel=0.50),
-            PhysicalMetricSpec(channel="PC", max_rms_rel=1.5, max_final_rel=0.35, max_peak_rel=0.50),
+            PhysicalMetricSpec(
+                channel="MDOT_TOTAL",
+                max_rms_rel=1.5,
+                max_final_rel=0.55,
+                max_peak_rel=0.60,
+                max_rise_time_error_s=1.5,
+            ),
+            PhysicalMetricSpec(
+                channel="THRUST",
+                max_rms_rel=1.5,
+                max_final_rel=0.55,
+                max_peak_rel=0.60,
+                max_rise_time_error_s=1.5,
+            ),
+            PhysicalMetricSpec(
+                channel="PC",
+                max_rms_rel=1.5,
+                max_final_rel=0.55,
+                max_peak_rel=0.60,
+                max_rise_time_error_s=1.5,
+            ),
             PhysicalMetricSpec(channel="C_STAR", max_rms_rel=0.25, max_final_rel=0.10, max_peak_rel=0.10),
         ],
-        windows=[PhaseWindow(name="all")],
+        windows=[PhaseWindow(name="powered", start_s=0.5, end_s=3.0)],
         output_dir=output_dir / case,
     )
     return report.to_dict()

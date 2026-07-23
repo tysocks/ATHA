@@ -414,12 +414,19 @@ def _write_acceptance_if_configured(
     values = _acceptance_values(result)
     residuals = {name: float(series[-1]) for name, series in result.residual_history.items() if series.size}
     shaft_paths = tuple(str(path) for path in cfg.get("shaft_paths", []) if isinstance(path, str)) if isinstance(cfg.get("shaft_paths", []), list) else ()
+    tolerances: dict[str, float] = {}
+    raw_tolerances = cfg.get("tolerances", {})
+    if isinstance(raw_tolerances, Mapping):
+        tolerances = {str(key): float(value) for key, value in raw_tolerances.items() if _is_number(value)}
+    design = context.analysis.get("design", {})
+    if isinstance(design, Mapping) and "thrust" in design and "design_thrust" not in tolerances and _is_number(design["thrust"]):
+        tolerances["design_thrust"] = float(design["thrust"])
     report = build_generic_port_acceptance_report(
         case=str(cfg.get("case", context.loaded.analysis_config.name)),
         time=result.time,
         values=values,
         residuals=residuals,
-        tolerances=cfg.get("tolerances", {}) if isinstance(cfg.get("tolerances", {}), Mapping) else {},
+        tolerances=tolerances,
         shaft_paths=shaft_paths,
         required_paths=tuple(str(path) for path in cfg.get("required_paths", []) if isinstance(path, str)) if isinstance(cfg.get("required_paths", []), list) else (),
         evaluation_end_s=float(cfg["evaluation_end_s"]) if cfg.get("evaluation_end_s") is not None else None,

@@ -50,6 +50,7 @@ Retained examples:
 .venv/bin/python examples/20_gg_single_shaft_methalox/run.py
 .venv/bin/python examples/22_ethanol_lox_5kn_two_shaft_gg/run.py
 .venv/bin/python examples/23_single_lox_pump_map/run.py
+.venv/bin/python -m atha.cli examples/25_chamber_startup_transient/configs --progress
 ```
 
 CLI:
@@ -57,6 +58,7 @@ CLI:
 ```bash
 .venv/bin/python -m atha.cli examples/21_generic_port_subsystems/chamber_nozzle --progress
 .venv/bin/python -m atha.cli examples/21_generic_port_subsystems/regen_channel --progress
+.venv/bin/python -m atha.cli examples/25_chamber_startup_transient/configs --progress
 ```
 
 Programmatic API:

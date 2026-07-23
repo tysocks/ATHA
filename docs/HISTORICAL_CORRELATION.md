@@ -76,7 +76,7 @@ the same report when `parity_channels` are provided.
 | --- | --- |
 | `pump_map_affinity_ramp` | Affinity-law pump ramp vs example 23 |
 | `valve_orifice_step` | Textbook orifice opening characterization |
-| `chamber_startup_envelope` | Literature-style Pc/thrust startup envelope |
+| `chamber_startup_envelope` | Literature-style Pc/thrust startup envelope (candidate: example 25) |
 
 These seeds are **not** proprietary hot-fire recordings. They establish the
 ingestion and reporting workflow until real test data or external-package

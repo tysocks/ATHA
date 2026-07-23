@@ -1,0 +1,55 @@
+name: chamber_startup_transient_engine
+units: SI
+components:
+  ox_supply:
+    type: BoundarySource
+    parameters: {P: 8.0e6, T: 95.0, rho: 1140.0, gamma: 1.2, cp: 1700.0}
+  fuel_supply:
+    type: BoundarySource
+    parameters: {P: 8.0e6, T: 110.0, rho: 420.0, gamma: 1.3, cp: 2200.0}
+  ambient:
+    type: BoundarySink
+    parameters: {P: 101325.0}
+  ox_valve:
+    type: Valve
+    transient: ox_valve
+    parameters: {CdA: 4.0e-4}
+  fuel_valve:
+    type: Valve
+    transient: fuel_valve
+    parameters: {CdA: 2.5e-4}
+  ox_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 5.0e5, mdot_design: 7.62}
+  fuel_injector:
+    type: MassFlowInjector
+    parameters: {delta_P_nominal: 5.0e5, mdot_design: 2.38}
+  chamber:
+    type: CombustionChamber
+    parameters:
+      volume: 0.05
+      gas_R: 420.0
+      T_adiabatic: 3500.0
+      initial_P: 1.0e5
+      initial_T: 3500.0
+      design_MR: 3.2
+      pressure_gain: 8.0e4
+      pressure_floor: 1.0e5
+      mdot_design: 10.0
+  nozzle:
+    type: Nozzle
+    parameters:
+      throat_area: 3.2e-3
+      exit_area: 3.2e-2
+      thrust_coefficient: 2.23
+      c_star: 1600.0
+      initial_P: 1.0e5
+connections:
+  - {from: ox_supply.outlet, to: ox_valve.inlet, domain: fluid}
+  - {from: ox_valve.outlet, to: ox_injector.inlet, domain: fluid}
+  - {from: ox_injector.outlet, to: chamber.ox_inlet, domain: fluid}
+  - {from: fuel_supply.outlet, to: fuel_valve.inlet, domain: fluid}
+  - {from: fuel_valve.outlet, to: fuel_injector.inlet, domain: fluid}
+  - {from: fuel_injector.outlet, to: chamber.fuel_inlet, domain: fluid}
+  - {from: chamber.outlet, to: nozzle.inlet, domain: fluid}
+  - {from: nozzle.outlet, to: ambient.inlet, domain: fluid}
