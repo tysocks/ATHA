@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from atha.config.mission_phases import (
     evaluate_advance_guard,
     parse_advance_guard,

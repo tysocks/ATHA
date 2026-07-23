@@ -13,9 +13,12 @@ from atha.validation.historical_correlation import (
     correlate_candidate_csv_against_dataset,
 )
 from atha.validation.parity import ParityChannelSpec, PhaseWindow
-from atha.validation.reference_checks import build_valve_orifice_reference_checks, orifice_mdot, write_reference_check_report_json
+from atha.validation.reference_checks import (
+    build_valve_orifice_reference_checks,
+    orifice_mdot,
+    write_reference_check_report_json,
+)
 from atha.validation.reference_data import discover_reference_datasets, load_reference_dataset
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HISTORICAL_ROOT = REPO_ROOT / "verification" / "historical"
@@ -24,7 +27,9 @@ HISTORICAL_ROOT = REPO_ROOT / "verification" / "historical"
 def _run_pump_correlation(output_dir: Path) -> dict:
     case = "pump_map_affinity_ramp"
     candidate_dir = output_dir / "candidate_pump"
-    result = run_config_folder(REPO_ROOT / "examples" / "23_single_lox_pump_map" / "configs", output_dir=candidate_dir, progress=False)
+    result = run_config_folder(
+        REPO_ROOT / "examples" / "23_single_lox_pump_map" / "configs", output_dir=candidate_dir, progress=False
+    )
     if result.csv is None:
         raise RuntimeError("pump candidate run did not produce CSV")
     report = correlate_candidate_csv_against_dataset(
@@ -32,9 +37,13 @@ def _run_pump_correlation(output_dir: Path) -> dict:
         dataset_path=HISTORICAL_ROOT / "pump_map_affinity_ramp",
         candidate_csv=result.csv,
         metric_specs=[
-            PhysicalMetricSpec(channel="MDOT", max_rms_rel=0.80, max_final_rel=0.60, max_peak_rel=0.80, max_rise_time_error_s=2.5),
+            PhysicalMetricSpec(
+                channel="MDOT", max_rms_rel=0.80, max_final_rel=0.60, max_peak_rel=0.80, max_rise_time_error_s=2.5
+            ),
             PhysicalMetricSpec(channel="PUMP_DP", max_rms_rel=0.80, max_final_rel=0.60, max_peak_rel=0.80),
-            PhysicalMetricSpec(channel="PUMP_RPM", max_rms_rel=0.70, max_final_rel=0.50, max_peak_rel=0.70, max_rise_time_error_s=2.0),
+            PhysicalMetricSpec(
+                channel="PUMP_RPM", max_rms_rel=0.70, max_final_rel=0.50, max_peak_rel=0.70, max_rise_time_error_s=2.0
+            ),
         ],
         parity_channels=[
             ParityChannelSpec(name="mdot", reference_channel="MDOT", rms_rtol=0.80, final_rtol=0.60, atol=1.0),

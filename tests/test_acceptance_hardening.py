@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from atha.validation.acceptance import build_generic_port_acceptance_report
 
 

@@ -64,8 +64,18 @@ def build_generic_port_acceptance_report(
         mdot_track = mdot[tracking_mask]
         target_mdot_track = target_mdot[tracking_mask]
         time_track = time[tracking_mask]
-        final_mdot_rel = abs(float(mdot_track[-1]) - float(target_mdot_track[-1])) / max(abs(float(target_mdot_track[-1])), 1.0e-12)
-        checks.append(_check("final_mdot_tracking", "generic_port", final_mdot_rel, float(tolerances.get("final_mdot_rel", 0.2)), "rel"))
+        final_mdot_rel = abs(float(mdot_track[-1]) - float(target_mdot_track[-1])) / max(
+            abs(float(target_mdot_track[-1])), 1.0e-12
+        )
+        checks.append(
+            _check(
+                "final_mdot_tracking",
+                "generic_port",
+                final_mdot_rel,
+                float(tolerances.get("final_mdot_rel", 0.2)),
+                "rel",
+            )
+        )
         tail = _tail_mask(time_track, seconds=float(tolerances.get("tracking_tail_s", 10.0)))
         checks.append(
             _check(
@@ -102,7 +112,9 @@ def build_generic_port_acceptance_report(
             )
         )
         if "min_powered_tail_thrust" in tolerances and thrust_track.size:
-            tail = _tail_mask(time_track, seconds=float(tolerances.get("powered_tail_s", tolerances.get("tracking_tail_s", 10.0))))
+            tail = _tail_mask(
+                time_track, seconds=float(tolerances.get("powered_tail_s", tolerances.get("tracking_tail_s", 10.0)))
+            )
             checks.append(
                 _check(
                     "min_powered_tail_thrust",
@@ -132,7 +144,15 @@ def build_generic_port_acceptance_report(
             )
         if "shutdown_final_thrust_fraction" in tolerances:
             fraction = float(thrust[-1]) / max(float(np.nanmax(thrust)), 1.0e-12)
-            checks.append(_check("shutdown_thrust_decay", "generic_port", fraction, float(tolerances["shutdown_final_thrust_fraction"]), "fraction"))
+            checks.append(
+                _check(
+                    "shutdown_thrust_decay",
+                    "generic_port",
+                    fraction,
+                    float(tolerances["shutdown_final_thrust_fraction"]),
+                    "fraction",
+                )
+            )
     for path in shaft_paths:
         series = _series(values, path)
         if series.size:
@@ -168,7 +188,9 @@ def build_generic_port_acceptance_report(
             passed=finite_outputs,
             value=1.0 if finite_outputs else 0.0,
             limit=1.0,
-            message="all generic-port arrays are finite" if finite_outputs else "one or more generic-port arrays contain NaN/Inf",
+            message="all generic-port arrays are finite"
+            if finite_outputs
+            else "one or more generic-port arrays contain NaN/Inf",
         )
     )
     return AcceptanceReport(

@@ -16,7 +16,7 @@ class SolverDriverResult:
     summary: object
     analysis_type: str
     mode: str
-    execution_plan: "ExecutionPlan"
+    execution_plan: ExecutionPlan
 
 
 @dataclass(frozen=True)

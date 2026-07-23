@@ -100,6 +100,12 @@ def detect_phase_transition(
     return PhaseTransition(time_s=float(time_s), previous=previous_phase, current=current_phase)
 
 
+def _phase_attr(phase: Any, key: str, default: Any = None) -> Any:
+    if isinstance(phase, Mapping):
+        return phase.get(key, default)
+    return getattr(phase, key, default)
+
+
 def resolve_phase_name(phases: list[Any], t: float, time_end_s: float | None = None) -> str | None:
     """Resolve the active named phase at time ``t`` using scheduled windows only.
 
@@ -111,11 +117,11 @@ def resolve_phase_name(phases: list[Any], t: float, time_end_s: float | None = N
 
     t = float(t)
     for phase in phases:
-        name = getattr(phase, "name", "") or ""
+        name = _phase_attr(phase, "name", "") or ""
         if not name:
             continue
-        start = float(getattr(phase, "start_s"))
-        end = float(getattr(phase, "end_s"))
+        start = float(_phase_attr(phase, "start_s"))
+        end = float(_phase_attr(phase, "end_s"))
         if start <= t < end:
             return str(name)
         if time_end_s is not None and t == float(time_end_s) and end == float(time_end_s):
@@ -190,11 +196,11 @@ def resolve_phase_name_with_guards(
     last_scheduled_end: float | None = None
 
     for phase in phases:
-        name = str(getattr(phase, "name", "") or "")
+        name = str(_phase_attr(phase, "name", "") or "")
         if not name:
             continue
-        scheduled_start = float(getattr(phase, "start_s"))
-        scheduled_end = float(getattr(phase, "end_s"))
+        scheduled_start = float(_phase_attr(phase, "start_s"))
+        scheduled_end = float(_phase_attr(phase, "end_s"))
         start = scheduled_start
         if previous_ended_early and cursor_end is not None:
             start = min(scheduled_start, cursor_end)
@@ -239,18 +245,16 @@ def update_forced_phase_ends(
         forced_end_times=updated,
     )
     for phase in phases:
-        name = str(getattr(phase, "name", "") or "")
+        name = str(_phase_attr(phase, "name", "") or "")
         if not name or name in updated:
             continue
         if active is not None and name != active:
             continue
-        start = float(getattr(phase, "start_s"))
-        end = float(getattr(phase, "end_s"))
+        start = float(_phase_attr(phase, "start_s"))
+        end = float(_phase_attr(phase, "end_s"))
         if not (start <= t < end) and name != active:
             continue
-        raw_guard = getattr(phase, "advance_when", None)
-        if raw_guard is None and isinstance(phase, Mapping):
-            raw_guard = phase.get("advance_when")
+        raw_guard = _phase_attr(phase, "advance_when", None)
         guard = parse_advance_guard(raw_guard if isinstance(raw_guard, Mapping) else None)
         if guard is None:
             continue

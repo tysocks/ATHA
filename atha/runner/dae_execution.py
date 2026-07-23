@@ -17,9 +17,14 @@ from atha.config import (
     evaluate_operating_targets,
     evaluate_timing_events,
 )
-from atha.config.schedules import collect_config_breakpoints
-from atha.config.controllers import controller_reset_state_values, controller_state_infos
-from atha.config.controllers import controller_evaluation_period, controller_is_active, controller_sample_index
+from atha.config.controllers import (
+    controller_evaluation_period,
+    controller_is_active,
+    controller_reset_state_values,
+    controller_sample_index,
+    controller_state_infos,
+)
+from atha.config.loader import LoadedAnalysisConfig
 from atha.config.mission_phases import (
     controller_hold_when_inactive,
     controller_should_reset_on_enter,
@@ -27,7 +32,7 @@ from atha.config.mission_phases import (
     resolve_phase_name_with_guards,
     update_forced_phase_ends,
 )
-from atha.config.loader import LoadedAnalysisConfig
+from atha.config.schedules import collect_config_breakpoints
 from atha.network import NetworkProblem, NetworkSolution, WarmStart
 from atha.network.preconditioner import precondition_algebraic_guess
 from atha.runner.progress import SolverProgressEvent
@@ -62,7 +67,7 @@ class DAEExecutionResult:
     boundary_history: dict[str, np.ndarray]
     measurement_history: dict[str, np.ndarray]
     points: list[DAEPoint] = field(default_factory=list)
-    segments: list["IntegrationSegment"] = field(default_factory=list)
+    segments: list[IntegrationSegment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

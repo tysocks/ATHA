@@ -10,8 +10,6 @@ channels:
   - {alias: NOZZLE_MDOT, source: nozzle.mdot, units: kg/s}
   - {alias: C_STAR, source: nozzle.c_star, units: m/s}
   - {alias: THRUST, source: nozzle.thrust, units: N}
-  - {alias: OX_VALVE, source: ox_valve.position}
-  - {alias: FUEL_VALVE, source: fuel_valve.position}
 exports: {csv: true, plot: true}
 plots:
   - {title: Chamber pressure, x: TIME, y: [PC], ylabel: Pressure}

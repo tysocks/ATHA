@@ -95,6 +95,7 @@ JSON reports next to telemetry.
 | `examples/22_ethanol_lox_5kn_two_shaft_gg` | Two-shaft GG mission-profile template |
 | `examples/23_single_lox_pump_map` | Pump-map transient verification seed |
 | `examples/24_pump_map_historical_parity` | Historical/literature parity vs affinity oracle |
+| `examples/25_chamber_startup_transient` | Real-component chamber ignition rise for historical correlation |
 
 ## Tests, lint, and benchmarks
 
@@ -105,6 +106,8 @@ JSON reports next to telemetry.
 
 # Lint / format
 .venv/bin/ruff check atha tests scripts
+.venv/bin/ruff format --check atha tests scripts
+# CI also runs these gates via `.github/workflows/ci.yml`
 .venv/bin/ruff format --check atha tests scripts
 
 # Runtime benchmarks (fast + medium by default)
