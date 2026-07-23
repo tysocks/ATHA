@@ -24,8 +24,9 @@ literature-style references under `verification/historical/`.
 ## Honest limitations
 
 1. Seeded references are synthetic or analytical — not proprietary hot-fire data.
-2. Example 25 provides a real finite-volume chamber rise transient; rise-time gates are
-   enabled but remain moderately loose until chemistry-accurate DAE combustors land.
+2. Example 25 provides a first-order ignition-envelope rise (not full injector
+   network closure); rise-time gates are enabled and pass against the seeded
+   envelope with moderately loose tolerances.
 3. GFSSP / FullFlow / ROCETS exported traces are not yet checked into the repo.
    The ingestion schema is ready for those packages once exports are available.
 
